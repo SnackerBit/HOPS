@@ -51,6 +51,6 @@ def get_debye_coefficients(N_terms, T, gamma, eta):
     ws[0] = gamma
     
     for j in range(1, N_terms):
-        gs[j] = - eta * 4*np.pi*T**2*gamma*(j-1) / (gamma**2 - 4*np.pi**2*T**2*(j-1)**2)
-        ws[j] = 2*np.pi*(j-1)*T
+        gs[j] = - eta * 4*np.pi*T**2*gamma*j / (gamma**2 - 4*np.pi**2*T**2*j**2)
+        ws[j] = 2*np.pi*j*T
     return gs, ws

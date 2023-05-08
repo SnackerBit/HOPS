@@ -62,9 +62,9 @@ class HOMPSModel:
         N, b_dagger, b, eye_aux = operators.generate_auxiallary_operators(N_trunc)
         # construct H_mpo
         self._H0_template = np.zeros((4, 4, 2, 2), dtype=complex)
-        self._H0_template[0, 0, :, :] = 1.j * eye
+        self._H0_template[0, 0, :, :] = -1.j * eye
         self._H0_template[0, 1, :, :] = 1.j * L
-        self._H0_template[0, 2, :, :] = 1.j * np.conj(L).T
+        self._H0_template[0, 2, :, :] = -1.j * np.conj(L).T
         self._H0_template[0, 3, :, :] = h
         self.H_mpo = [None]*(self.N_bath + 1)
         self.H_mpo[0] = self._H0_template.copy()
@@ -74,9 +74,9 @@ class HOMPSModel:
             self.H_mpo[i+1][1, 1, :, :] = eye_aux
             self.H_mpo[i+1][2, 2, :, :] = eye_aux
             self.H_mpo[i+1][3, 3, :, :] = eye_aux
-            self.H_mpo[i+1][0, 3, :, :] = -w[i]*N
+            self.H_mpo[i+1][0, 3, :, :] = w[i]*N
             self.H_mpo[i+1][1, 3, :, :] = g[i]*N@b_dagger
-            self.H_mpo[i+1][2, 3, :, :] = -b
+            self.H_mpo[i+1][2, 3, :, :] = b
             
     """
     Updates the MPO (linear HOMPS). Should be called before each time step
@@ -88,8 +88,7 @@ class HOMPSModel:
     def update_mpo_linear(self, zt):
         self.H_mpo[0] = self._H0_template.copy()
         self.H_mpo[0][0, 3, :, :] += 1.j * zt * self.L
-            
-            
+                        
     """
     Updates the MPO (non-linear HOMPS). Should be called before each time step
     ------------------------------------
@@ -103,4 +102,14 @@ class HOMPSModel:
     """
     def update_mpo_nonlinear(self, zt, expL):
         self.update_mpo_linear(zt)
-        self.H_mpo[0][0, 2, :, :] -= 1.j * expL * self.eye
+        self.H_mpo[0][0, 2, :, :] += 1.j * expL * self.eye
+        
+    """
+    Computes self.update_mpo from self.H_mpo. The update MPO is just -1.j*H_mpo.
+    """
+    def compute_update_mpo(self):
+        N = len(self.H_mpo)
+        self.update_mpo = [None] * N
+        factor = np.power(-1.j, 1/N)
+        for i in range(N):
+            self.update_mpo[i] = factor * np.transpose(self.H_mpo[i].copy(), (0, 1, 3, 2)) # wL, wR, i, i* -> wL, wR, i*, i

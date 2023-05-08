@@ -6,7 +6,6 @@ import warnings
 
 __all__ = ['lanczos_iteration', 'arnoldi_iteration', 'eigh_krylov', 'expm_krylov']
 
-
 def lanczos_iteration(Afunc, vstart, numiter):
     """
     Perform a "matrix free" Lanczos iteration.

@@ -1,6 +1,7 @@
 import numpy as np
-from .mps import split_truncate_theta
+from ..mps import mps
 from scipy.linalg import expm
+from scipy.sparse.linalg import expm_multiply
 import time
 from ..util import krylov
 
@@ -88,7 +89,7 @@ class TDVPEngine:
         theta = evolve(theta, Heff, self.dt/2, self.N_krylov)
         theta = np.reshape(theta, theta_shape)
         # split and truncate
-        Ai, Sj, Bj = split_truncate_theta(theta, self.chi_max, self.eps, normalize=self.normalize)
+        Ai, Sj, Bj = mps.split_truncate_theta(theta, self.chi_max, self.eps, normalize=self.normalize)
         # put back into MPS
         Gi = np.tensordot(np.diag(self.psi.Ss[i]**(-1)), Ai, axes=[1, 0])  # vL [vL*], [vL] i vC
         self.psi.Bs[i] = np.tensordot(Gi, np.diag(Sj), axes=[2, 0])  # vL i [vC], [vC*] vC
@@ -247,8 +248,8 @@ class HeffSingle:
         """
         Parameters
         ----------
-        theta : np.ndarray
-            the two-site wavefunction, must be reshapable into (vL, i, vR)
+        psi : np.ndarray
+            the one-site wavefunction, must be reshapable into (vL, i, vR)
             
         Returns
         -------
@@ -261,6 +262,17 @@ class HeffSingle:
         x = np.tensordot(x, self.RP, axes=([1, 2], [0, 1]))  # vL [vR] [wR] i, [vR*] [wR*] vR
         x = np.reshape(x, self.shape[0]) # vL i vR
         return x
+    
+    def get_as_matrix(self):
+        """
+        Returns the effective Hamiltonian as a matrix
+        """
+        result = np.tensordot(self.LP, self.W, ([1], [0])) # vL [wL*] vL*; [wL] wR i i* -> vL vL* wR i i*
+        result = np.tensordot(result, self.RP, ([2], [1])) # vL vL* [wR] i i*; vR* [wR*] vR -> vL vL* i i* vR* vR
+        result = np.transpose(result, (0, 2, 5, 1, 3, 4)) # vL vL* i i* vR* vR -> vL i vR vL* i* vR*
+        mat_shape = self.psi_shape[0] * self.psi_shape[1] * self.psi_shape[2]
+        result = np.reshape(result, (mat_shape, mat_shape))
+        return result
 
 def evolve(psi, H, dt, N_krylov, debug=False):
     """
@@ -279,4 +291,5 @@ def evolve(psi, H, dt, N_krylov, debug=False):
         iterations for the krylov exponentiation
     """
     #return expm(-1.j * H.get_as_matrix() * dt) @ psi
-    return krylov.expm_krylov(H.multiply, psi, -1.j*dt, min(int(psi.size), N_krylov))
+    #return expm_multiply(-1.j * H.get_as_matrix() * dt, psi)
+    return krylov.expm_krylov(H.multiply, psi, -1.j*dt, min(int(psi.size), N_krylov), hermitian=True)
