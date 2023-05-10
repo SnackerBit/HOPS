@@ -13,6 +13,7 @@ Three implementations are given in this file:
 1.) Implementation using a multivariate gaussian distribution
 2.) Implementation using Fourier Filtering technique as also used in the original HOPS filter
 3.) Custom implementation using Fourier Filtering technique. Produces similar results to 2.)
+4.) Implementation using a sum to approximate the BCF
 
 TODO: Maybe Switch to 3.) in all files using the noise generators!
 
@@ -72,7 +73,7 @@ class ColoredNoiseGenerator_Gaussian:
         res = np.random.multivariate_normal(mean=np.zeros(self.N_steps*2), cov=self.cov_matrix)
         x, y = res[0::2], res[1::2]
         return x + 1j*y
-    
+
 def generate_white_noise(N):
     """
     Helper function that generates white complex noise
@@ -88,7 +89,7 @@ def generate_white_noise(N):
         array of length N containing the complex white noise
     """ 
     return np.sqrt(-np.log(np.random.rand(N))) * np.exp(2.j*np.pi*np.random.rand(N))
-    
+
 class ColoredNoiseGenerator_FourierFiltering:
     """
     Class that generates a stochastic process with the given correlations
@@ -146,7 +147,7 @@ class ColoredNoiseGenerator_FourierFiltering:
         """
         eta = generate_white_noise(2*self.N_steps)
         return np.fft.ifft(np.fft.fft(eta) * self.sqrtJ)[0:self.N_steps]
-    
+
 class ColoredNoiseGenerator_FourierFiltering_custom:
     """
     Class that generates a stochastic process with the given correlations
@@ -204,3 +205,64 @@ class ColoredNoiseGenerator_FourierFiltering_custom:
         """
         eta = generate_white_noise(2*self.N_steps-1)
         return np.fft.ifft(np.fft.fft(eta) * self.sqrtJ)[0:self.N_steps]
+
+# +
+#class ColoredNoiseGenerator_SumApprox:
+#    """
+#    Class that generates a stochastic process with the given correlations
+#    using the Sum approximation technique as described in the supplementary
+#    material of the HOMPS paper
+#    
+#    Attributes
+#    ----------
+#    N_steps : int:
+#        length of the discrete stochastic process
+#    T : float
+#        the temperature
+#    S : function
+#        function that takes a single float and returns a float.
+#        The spectral function
+#    N : int
+#        number of steps for the sum approximation
+#    dw : float
+#        the stepsize in omega
+#        
+#    Methods
+#    -------
+#    sample_process()
+#        samples one realization of the stochastic process
+#    """
+#    
+#    def __init__(self, N_steps, alpha, t_start, t_stop):
+#        """
+#        Initializes the generator by computing the values of the correlation function alpha
+#        at the discrete time steps and transforming it to frequency space
+#        ----------
+#        Parameters
+#        N_steps : int
+#            length of the noise
+#        alpha: function of float returning complex 
+#            correlation function
+#        t_start : float 
+#            starting time of the process
+#        t_stop : float 
+#            final time of the process
+#        """
+#        self.N_steps = N_steps
+#        assert(t_start==0)
+#        ts = np.linspace(-t_stop, t_stop, 2*N_steps-1)
+#        correlations = np.array(alpha(ts))
+#        # compute spectral density by IFT and normalizing properly
+#        self.sqrtJ = np.sqrt(np.fft.fft(correlations))
+#        
+#    def sample_process(self):
+#        """
+#        Generates a realization of a complex gaussian process
+#        
+#        Returns
+#        -------
+#        np.ndarray:
+#            array of length N containing the complex stochastic process
+#        """
+#        eta = generate_white_noise(2*self.N_steps-1)
+#        return np.fft.ifft(np.fft.fft(eta) * self.sqrtJ)[0:self.N_steps]

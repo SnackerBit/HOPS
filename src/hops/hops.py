@@ -354,19 +354,18 @@ class HOPS_Engine_Simple:
             # initially compute debug_info
             if compute_debug_info:
                 self.compute_debug_info(n, 0)
-            # main loop
-            if self.method == 'RK4':
-                for i in range(0, self.N_steps-1):
+            # Compute realization
+            for i in range(0, self.N_steps-1):
+                if self.method == 'RK4':
                     self.compute_update_RK4(i)
-                    psis[n, i+1, :] = self.psi[0:self.dim]
-                    if compute_debug_info:
-                        self.compute_debug_info(n, i+1)
-            else:
-                for i in range(0, self.N_steps-1):
+                else:
                     self.compute_update_Trotter(i)
-                    psis[n, i+1, :] = self.psi[0:self.dim]
-                    if compute_debug_info:
-                        self.compute_debug_info(n, i+1)
+                if not self.linear:
+                    # normalize
+                    self.psi /= np.linalg.norm(self.psi)
+                psis[n, i+1, :] = self.psi[0:self.dim]
+                if compute_debug_info:
+                    self.compute_debug_info(n, i+1)
         return psis
     
     def initialize_debug_info(self, N_samples):

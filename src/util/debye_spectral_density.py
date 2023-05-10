@@ -21,7 +21,7 @@ def debye_spectral_density(w, eta, gamma):
         the debye spectral density for the given frequence/frequencies
     """
     return eta * w * gamma / (w**2 + gamma**2)
-    
+
 def get_debye_coefficients(N_terms, T, gamma, eta):
     """
     Constructs the expansion coefficients g_j and w_j for the

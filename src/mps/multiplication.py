@@ -34,6 +34,8 @@ def multiply(psi, Ws, chi_max, eps, inplace=False, compress=True):
     -------
     mps' : MPS
         Ws * mps
+    error : float
+        the truncation error
     """
     assert(len(Ws)==psi.L)
     Bs = [None]*psi.L
@@ -57,11 +59,13 @@ def multiply(psi, Ws, chi_max, eps, inplace=False, compress=True):
         psi.Bs = Bs
         psi.canonical = False
         if compress:
-            psi.compress(chi_max, eps)
+            return psi.compress(chi_max, eps)
+        return 0
     else:
-        result = mps.MPS(Bs, [None]*psi.L)
+        result = mps.MPS(Bs, [None]*psi.L, use_precise_svd=psi.use_precise_svd)
         result.norm = psi.norm
         result.canonical = False
+        error = 0
         if compress:
-            result.compress(chi_max, eps)
-        return result
+            error = result.compress(chi_max, eps)
+        return result, error

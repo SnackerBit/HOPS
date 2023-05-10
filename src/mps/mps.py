@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.linalg import svd
 from numpy.linalg import qr
+from ..util import svd_prec
 
 class MPS:
     """Class for a matrix product state.
@@ -27,9 +28,11 @@ class MPS:
         into canonical form by calling self.compress()
     norm : complex
         a scaler factor of the whole MPS. Used to make the MPS more numerically stable
+    use_precise_svd : bool
+        wether to use the slower but more precise SVD from util.svd_prec.
     """
 
-    def __init__(self, Bs, Ss, canonical=True, norm=1.):
+    def __init__(self, Bs, Ss, canonical=True, norm=1., use_precise_svd=False):
         """
         Initializes a right-canonical MPS. Assumes the Bs and Ss tensors
         are given in the correct form
@@ -39,6 +42,11 @@ class MPS:
         self.L = len(Bs)
         self.canonical = canonical
         self.norm = norm
+        self.use_precise_svd = use_precise_svd
+        if self.use_precise_svd:
+            self.dtype = np.complex256
+        else:
+            self.dtype = np.float128
 
     def copy(self):
         result = MPS([B.copy() for B in self.Bs], [S.copy() for S in self.Ss])
@@ -113,13 +121,22 @@ class MPS:
             no limit for the bond dimension is imposed
         eps : float
             lower threshhold for the absolute size of singular values
+            
+        Returns
+        -------
+        float :
+            the compression error
         """
         # sweep left to right using QR decompositions
         B = self.Bs[0]
         for i in range(self.L-1):
             chi_vL, chi_i, chi_vR = B.shape
             B = np.reshape(B, (chi_vL*chi_i, chi_vR)) # vL i vR -> (vL i) vR
-            Q, R = qr(B)
+            if self.use_precise_svd:
+                Q, S, R = svd_prec.svd_prec(B)
+                R = np.tensordot(np.diag(S), R, ([1], [0])) # DEBUG, TODO: Change!
+            else:
+                Q, R = qr(B)
             chi_new = Q.shape[1]
             B = np.reshape(Q, (chi_vL, chi_i, chi_new))
             self.Bs[i] = B
@@ -127,11 +144,15 @@ class MPS:
             B = np.tensordot(R, B, ([1], [0])) # vL [vR]; [vL] i vR -> vL i vR
             
         # sweep right to left using SVDs to compute singular values
+        error = 0.0
         for i in range(self.L - 1, 0, -1):
             chi_vL, chi_i, chi_vR = B.shape
             B = np.reshape(B, (chi_vL, chi_i*chi_vR)) # vL i vR -> vL (i vR)
             # perform SVD
-            U, S, V = svd(B, full_matrices=False, lapack_driver='gesvd')
+            if self.use_precise_svd:
+                U, S, V = svd_prec.svd_prec(B)
+            else:
+                U, S, V = svd(B, full_matrices=False, lapack_driver='gesvd')
             # truncate
             if chi_max > 0:
                 chi_new = min(chi_max, np.sum(S > eps))
@@ -143,9 +164,12 @@ class MPS:
             #    print("singular values cut: 0.")
             #else:
             #    print("singular values cut:", np.sum(S[(S.size-chi_new)::]))
+            error += np.sum(S[chi_new:]**2)
             U, S, V = U[:, piv], S[piv], V[piv, :]
             # renormalize
             norm = np.linalg.norm(S)
+            if norm < 1.e-7:
+                print("[WARNING]: Small singular values, norm(S) < 1.e-7!")
             S = S / norm
             self.norm *= norm
             # put back and update B
@@ -158,6 +182,9 @@ class MPS:
         self.Bs[0] = B
         self.Ss[0] = np.array([1.])
         self.canonical = True
+        if error > 1.e-3:
+            print("[WARNING]: Large error", error, "> 1.e-3 detected")
+        return error
       
     @staticmethod
     def initialize_spinup(L):
@@ -184,7 +211,7 @@ class MPS:
             maximal bond dimension.
         eps : float
             lower threshhold for the absolute size of singular values
-        d : int
+        d : (list of) int
             the dimension of the local Hilbert space on each site,
             eg. d=2 for spin-1/2.
             
@@ -193,8 +220,11 @@ class MPS:
         psi_mps : MPS
             the state compressed into an MPS
         """
+        if type(d) != list:
+            d = [d]*L
+        d = np.array(d, dtype=int)
         # first, reshape the state into a single column vector (if its not already in this form)
-        psi_aL = np.reshape(psi, (d**L, 1))
+        psi_aL = np.reshape(psi, (np.prod(d), 1))
         Bs = [None] * L
         Ss = [None] * L 
         norm = 1.
@@ -203,9 +233,9 @@ class MPS:
             # compute Chi_n and R_dim. Chi_n * 2 will be the "dimension" d^(L_a) of subsystem A, 
             # R_dim//2 will be the "dimension" d^(L_b) of subsystem B
             L_dim, Chi_n = psi_aL.shape
-            assert L_dim == d**(n+1)
+            assert L_dim == np.prod(d[0:n+1])
             # Reshape wavefunction
-            psi_LR = np.reshape(psi_aL, (L_dim//2, Chi_n*2))
+            psi_LR = np.reshape(psi_aL, (L_dim//d[n], Chi_n*d[n]))
             # perform SVD
             psitilde_n, lambda_n, M_n = svd(psi_LR, full_matrices=False, lapack_driver='gesvd')
             # if necessary, truncate (keep only the schmidt vectors corresponding to the chi_max largest schmidt values)!
@@ -220,7 +250,7 @@ class MPS:
             # reshape M_[n]
             Chi_np1 = len(lambda_n)
             # physical index is always the dimension!
-            M_n = np.reshape(M_n, (Chi_np1, d, Chi_n))
+            M_n = np.reshape(M_n, (Chi_np1, d[n], Chi_n))
             # reabsorb lambda
             psi_aL = psitilde_n[:,:] * lambda_n[np.newaxis, :]
             Bs[n] = M_n
@@ -243,7 +273,7 @@ class MPS:
         return self.norm * contr[:, 0]
 
     @staticmethod
-    def init_HOMPS_MPS(psi0, N_bath, N_trunc):
+    def init_HOMPS_MPS(psi0, N_bath, N_trunc, use_precise_svd=False):
         """
         Returns a product state MPS that can be used in HOMPS.
         All bath modes are initially set to zero
@@ -256,6 +286,8 @@ class MPS:
             number of bath sites
         N_trunc : int
             truncation order of the bath sites
+        use_precise_svd : bool
+            wether to use the slower but more precise SVD from util.svd_prec.
         
         Returns
         -------
@@ -264,17 +296,20 @@ class MPS:
             shape (1, d, 1), and all others have shape (1, N_trunc, 1).
             In total there are (N_bath + 1) tensors in the MPS
         """
-        B_physical = np.zeros([1, psi0.size, 1], dtype=complex)
+        dtype=complex
+        if use_precise_svd:
+            dtype=np.complex256
+        B_physical = np.zeros([1, psi0.size, 1], dtype=dtype)
         B_physical[0, :, 0] = psi0
-        B_bath = np.zeros([1, N_trunc, 1], dtype=complex)
+        B_bath = np.zeros([1, N_trunc, 1], dtype=dtype)
         B_bath[0, 0, 0] = 1.
         Bs = [B_bath.copy() for i in range(N_bath)]
         Bs.insert(0, B_physical.copy())
         S = np.ones([1], dtype=float)
         Ss = [S.copy() for i in range(N_bath + 1)]
-        return MPS(Bs, Ss)
+        return MPS(Bs, Ss, use_precise_svd=use_precise_svd)
 
-def split_truncate_theta(theta, chi_max, eps, normalize=True):
+def split_truncate_theta(theta, chi_max, eps, normalize=True, use_precise_svd=False):
     """Split and truncate a two-site wave function in mixed canonical form.
 
     Split a two-site wave function as follows::
@@ -292,9 +327,7 @@ def split_truncate_theta(theta, chi_max, eps, normalize=True):
         Maximum number of singular values to keep
     eps : float
         Discard any singular values smaller than that.
-    normalize : bool
-        Wether to normalize the singular values after truncation
-
+        
     Returns
     -------
     A : np.Array[ndim=3]
@@ -303,11 +336,18 @@ def split_truncate_theta(theta, chi_max, eps, normalize=True):
         Singular/Schmidt values.
     B : np.Array[ndim=3]
         Right-canonical matrix on site j, with legs ``vC, j, vR``
+    norm_factor : float
+        the factor by which the norm should be multiplied
+    use_precise_svd : bool
+        wether to use the slower but more precise SVD from util.svd_prec.
     """
     chivL, dL, dR, chivR = theta.shape
     #print(theta.shape)
     theta = np.reshape(theta, [chivL * dL, dR * chivR])
-    X, Y, Z = svd(theta, full_matrices=False, lapack_driver='gesvd')
+    if use_precise_svd:
+        X, Y, Z = svd_prec.svd_prec(theta)
+    else:
+        X, Y, Z = svd(theta, full_matrices=False, lapack_driver='gesvd')
     #print(Y)
     # truncate
     chivC = min(chi_max, np.sum(Y > eps))
@@ -315,10 +355,9 @@ def split_truncate_theta(theta, chi_max, eps, normalize=True):
     piv = np.argsort(Y)[::-1][:chivC]  # keep the largest `chivC` singular values
     X, Y, Z = X[:, piv], Y[piv], Z[piv, :]
     # renormalize
-    S = Y
-    if normalize:
-        S = Y / np.linalg.norm(Y)  # == Y/sqrt(sum(Y**2))
+    norm_factor = np.linalg.norm(Y)
+    S = Y / norm_factor
     # split legs of X and Z
     A = np.reshape(X, [chivL, dL, chivC])
     B = np.reshape(Z, [chivC, dR, chivR])
-    return A, S, B
+    return A, S, B, norm_factor

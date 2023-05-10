@@ -58,5 +58,5 @@ def uncompress(psi):
     contr = psi.Bs[0][0] # i VR
     for i in range(1, psi.L):
         contr = np.tensordot(contr, psi.Bs[i], ([1], [0])) # i [vR]; [vL] j vR -> i j vR
-        contr = np.tensordot(contr, (contr.shape[0]*contr.shape[1], contr.shape[2])) # i j vR -> i' vR
-    return contr[:, 0]
+        contr = np.reshape(contr, (contr.shape[0]*contr.shape[1], contr.shape[2])) # i j vR -> i' vR
+    return contr[:, 0]*psi.norm

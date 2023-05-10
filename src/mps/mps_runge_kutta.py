@@ -31,18 +31,20 @@ def integrate_MPS_RK4(psi, dt, update_mpo, chi_max, eps):
     -------
     psi' : MPS
         the updated MPS
+    error : float
+        the sum of all truncation errors
     """
-    k1 = multiplication.multiply(psi, update_mpo, chi_max, eps, inplace=False, compress=True)
-    temp = addition.add(psi, k1, chi_max, eps, dt/2, compress=False)
-    k2 = multiplication.multiply(temp, update_mpo, chi_max, eps, inplace=False, compress=True)
-    temp = addition.add(psi, k2, chi_max, eps, dt/2, compress=False)
-    k3 = multiplication.multiply(temp, update_mpo, chi_max, eps, inplace=False, compress=True)
-    temp = addition.add(psi, k3, chi_max, eps, dt, compress=False)
-    k4 = multiplication.multiply(temp, update_mpo, chi_max, eps, inplace=False, compress=True)
+    errors = np.empty(5, dtype=float)
+    k1, errors[0] = multiplication.multiply(psi, update_mpo, chi_max, eps, inplace=False, compress=True)
+    temp, _ = addition.add(psi, k1, chi_max, eps, dt/2, compress=False)
+    k2, errors[1] = multiplication.multiply(temp, update_mpo, chi_max, eps, inplace=False, compress=True)
+    temp, _ = addition.add(psi, k2, chi_max, eps, dt/2, compress=False)
+    k3, errors[2] = multiplication.multiply(temp, update_mpo, chi_max, eps, inplace=False, compress=True)
+    temp, _ = addition.add(psi, k3, chi_max, eps, dt, compress=False)
+    k4, errors[3] = multiplication.multiply(temp, update_mpo, chi_max, eps, inplace=False, compress=True)
     
-    result = addition.add(psi, k1, chi_max, eps, dt/6, compress=False)
-    result = addition.add(result, k2, chi_max, eps, dt*2/6, compress=False)
-    result = addition.add(result, k3, chi_max, eps, dt*2/6, compress=False)
-    result = addition.add(result, k4, chi_max, eps, dt/6, compress=True)
-    
-    return result
+    result, _ = addition.add(psi, k1, chi_max, eps, dt/6, compress=False)
+    result, _ = addition.add(result, k2, chi_max, eps, dt*2/6, compress=False)
+    result, _ = addition.add(result, k3, chi_max, eps, dt*2/6, compress=False)
+    result, errors[4] = addition.add(result, k4, chi_max, eps, dt/6, compress=True)
+    return result, np.sum(errors)

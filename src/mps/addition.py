@@ -35,6 +35,8 @@ def add(psi1, psi2, chi_max, eps, factor=1., compress=True):
     -------
     psi : MPS
         psi1 + factor * psi2
+    error : float
+        the truncation error
     """
     assert(psi1.L == psi2.L)
     
@@ -58,8 +60,9 @@ def add(psi1, psi2, chi_max, eps, factor=1., compress=True):
     Bs[-1][B1.shape[0]:, :, 0] = B2[:, :, 0].copy()
     
     # compress the result
-    result = mps.MPS(Bs, [None]*psi1.L)
+    result = mps.MPS(Bs, [None]*psi1.L, use_precise_svd=psi1.use_precise_svd)
     result.canonical = False
+    error = 0
     if compress:
-        result.compress(chi_max, eps)
-    return result
+        error = result.compress(chi_max, eps)
+    return result, error

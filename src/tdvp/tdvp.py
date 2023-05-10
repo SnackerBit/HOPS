@@ -3,7 +3,6 @@ from ..mps import mps
 from scipy.linalg import expm
 from scipy.sparse.linalg import expm_multiply
 import time
-from ..util import krylov
 
 class TDVPEngine:
     """
@@ -27,12 +26,10 @@ class TDVPEngine:
         maximal bond dimension (everything above that gets truncated)
     eps : float
         minimal singular value (everything below that gets truncated)
-    N_krylov : int
-        number of iterations for the krylov matrix exponentiation
     normalize : bool
         controls if the singular values are normalized after truncation
     """
-    def __init__(self, psi, model, dt, chi_max, eps, N_krylov=5, normalize=True):
+    def __init__(self, psi, model, dt, chi_max, eps, normalize=True):
         assert psi.L == model.N  # ensure compatibility
         self.model = model
         self.psi = psi
@@ -41,7 +38,6 @@ class TDVPEngine:
         self.chi_max = chi_max
         self.eps = eps
         self.dt = dt
-        self.N_krylov = N_krylov
         self.normalize = normalize
         # initialize left and right environment
         D = model.H_mpo[0].shape[0]
@@ -83,13 +79,15 @@ class TDVPEngine:
         theta = self.psi.get_theta2(i) # vL, i, j, vR
         theta_shape = theta.shape
         # get effective two-site Hamiltonian
-        Heff = HeffDouble(self.LPs[i], self.RPs[j], self.model.H_mpo[i], self.model.H_mpo[j])
+        Heff = compute_Heff_Twosite(self.LPs[i], self.RPs[j], self.model.H_mpo[i], self.model.H_mpo[j])
         theta = np.reshape(theta, [Heff.shape[0]])
         # evolve 2-site wave function forward in time
-        theta = evolve(theta, Heff, self.dt/2, self.N_krylov)
+        theta = evolve(theta, Heff, self.dt/2)
         theta = np.reshape(theta, theta_shape)
         # split and truncate
-        Ai, Sj, Bj = mps.split_truncate_theta(theta, self.chi_max, self.eps, normalize=self.normalize)
+        Ai, Sj, Bj, norm_factor = mps.split_truncate_theta(theta, self.chi_max, self.eps)
+        if self.normalize == False:
+            self.psi.norm *= norm_factor
         # put back into MPS
         Gi = np.tensordot(np.diag(self.psi.Ss[i]**(-1)), Ai, axes=[1, 0])  # vL [vL*], [vL] i vC
         self.psi.Bs[i] = np.tensordot(Gi, np.diag(Sj), axes=[2, 0])  # vL i [vC], [vC*] vC
@@ -103,9 +101,9 @@ class TDVPEngine:
                 psi_shape = psi.shape
                 psi = psi.flatten()
                 # compute effective one-site Hamiltonian
-                Heff = HeffSingle(self.LPs[j], self.RPs[j], self.model.H_mpo[j])
+                Heff = compute_Heff_Onesite(self.LPs[j], self.RPs[j], self.model.H_mpo[j])
                 # evolve 1-site wave function backwards in time
-                psi = evolve(psi, Heff, -self.dt/2, self.N_krylov)
+                psi = evolve(psi, Heff, -self.dt/2)
                 psi = np.reshape(psi, psi_shape)
                 # put back into MPS
                 Gj = np.tensordot(np.diag(self.psi.Ss[j]**(-1)), psi, axes=[1, 0])  # vL [vL*], [vL] i vR
@@ -118,9 +116,9 @@ class TDVPEngine:
                 psi_shape = psi.shape
                 psi = psi.flatten()
                 # compute effective one-site Hamiltonian
-                Heff = HeffSingle(self.LPs[i], self.RPs[i], self.model.H_mpo[i])
+                Heff = compute_Heff_Onesite(self.LPs[i], self.RPs[i], self.model.H_mpo[i])
                 # evolve 1-site wave function backwards in time
-                psi = evolve(psi, Heff, -self.dt/2, self.N_krylov)
+                psi = evolve(psi, Heff, -self.dt/2)
                 psi = np.reshape(psi, psi_shape)
                 # put back into MPS
                 Gi = np.tensordot(np.diag(self.psi.Ss[i]**(-1)), psi, axes=[1, 0])  # vL [vL*], [vL] i vR
@@ -151,130 +149,69 @@ class TDVPEngine:
         LP = np.tensordot(W, LP, axes=[[0, 3], [1, 2]])  # [wL] wR i [i*], vL [wL*] [i] vR
         LP = np.tensordot(Ac, LP, axes=[[0, 1], [2, 1]])  # [vL*] [i*] vR*, wR [i] [vL] vR
         self.LPs[j] = LP  # vR* wR vR (== vL wL* vL* on site i+1)
-        
-class HeffDouble:
+
+def compute_Heff_Twosite(LP, RP, W1, W2):
     """
-    Class that can be used to perform the multiplication
+    Computes the two-site effective hamiltonian
     |theta'> = H_eff |theta>
-    as a "non-matrix" operation!
-    """
     
-    def __init__(self, LP, RP, W1, W2):
-        """
-        Initializes the effective hamiltonian
+    Parameters
+    ----------
+    LP : np.nadarray, shape vL wL* vL*
+        the left environment tensor
+    RP : np.ndarray, shape vR* wR* vR
+        the right environment tensor
+    Wi : np.ndarray, shape wL wC i i*
+        the MPO tensor acting on site i
+    Wj : np.ndarray, shape wC wR j j*
+        the MPO tensor acting on sitr j = i + 1
         
-        Parameters
-        ----------
-        LP : np.nadarray, shape vL wL* vL*
-            the left environment tensor
-        RP : np.ndarray, shape vR* wR* vR
-            the right environment tensor
-        Wi : np.ndarray, shape wL wC i i*
-            the MPO tensor acting on site i
-        Wj : np.ndarray, shape wC wR j j*
-            the MPO tensor acting on sitr j = i + 1
-        """
-        self.LP = LP  # vL wL* vL*
-        self.RP = RP  # vR* wR* vR
-        self.W1 = W1  # wL wC i i*
-        self.W2 = W2  # wC wR j j*
-        chi1, chi2 = LP.shape[0], RP.shape[2]
-        d1, d2 = W1.shape[2], W2.shape[2]
-        self.theta_shape = (chi1, d1, d2, chi2)  # vL i j vR
-        self.shape = (chi1 * d1 * d2 * chi2, chi1 * d1 * d2 * chi2)
-        self.dtype = W1.dtype
+    Returns
+    -------
+    H_eff : np.ndarray
+        the effective Hamiltonian as a matrix of dimensions
+        '(vL i j vR) (vL* i* j* vR*)'
+    """
+    chi1, chi2 = LP.shape[0], RP.shape[2]
+    d1, d2 = W1.shape[2], W2.shape[2]
+    result = np.tensordot(LP, W1, ([1], [0])) # vL [wL*] vL*; [wL] wC i i* -> vL vL* wC i i*
+    result = np.tensordot(result, W2, ([2], [0])) # vL vL* [wC] i i*; [wC] wR j j* -> vL vL* i i* wR j j*
+    result = np.tensordot(result, RP, ([4], [1])) # vL vL* i i* [wR] j j*; vR* [wR*] vR -> vL vL* i i* j j* vR* vR
+    result = np.transpose(result, (0, 2, 4, 7, 1, 3, 5, 6)) # vL vL* i i* j j* vR* vR -> vL i j vR vL* i* j* vR*
+    mat_shape = chi1*chi2*d1*d2
+    result = np.reshape(result, (mat_shape, mat_shape))
+    return result
 
-    def multiply(self, theta):
-        """
-        Parameters
-        ----------
-        theta : np.ndarray
-            the two-site wavefunction, must be reshapable into (vL, i, j, vR)
-            
-        Returns
-        -------
-        np.ndarray :
-            Heff@theta
-        """
-        x = np.reshape(theta, self.theta_shape)  # vL i j vR
-        x = np.tensordot(self.LP, x, axes=(2, 0))  # vL wL* [vL*], [vL] i j vR
-        x = np.tensordot(x, self.W1, axes=([1, 2], [0, 3]))  # vL [wL*] [i] j vR, [wL] wC i [i*]
-        x = np.tensordot(x, self.W2, axes=([3, 1], [0, 3]))  # vL [j] vR [wC] i, [wC] wR j [j*]
-        x = np.tensordot(x, self.RP, axes=([1, 3], [0, 1]))  # vL [vR] i [wR] j, [vR*] [wR*] vR
-        x = np.reshape(x, self.shape[0])
-        return x
-    
-    def get_as_matrix(self):
-        """
-        Returns the effective Hamiltonian as a matrix
-        """
-        result = np.tensordot(self.LP, self.W1, ([1], [0])) # vL [wL*] vL*; [wL] wC i i* -> vL vL* wC i i*
-        result = np.tensordot(result, self.W2, ([2], [0])) # vL vL* [wC] i i*; [wC] wR j j* -> vL vL* i i* wR j j*
-        result = np.tensordot(result, self.RP, ([4], [1])) # vL vL* i i* [wR] j j*; vR* [wR*] vR -> vL vL* i i* j j* vR* vR
-        result = np.transpose(result, (0, 2, 4, 7, 1, 3, 5, 6)) # vL vL* i i* j j* vR* vR -> vL i j vR vL* i* j* vR*
-        mat_shape = self.theta_shape[0] * self.theta_shape[1] * self.theta_shape[2] * self.theta_shape[3]
-        result = np.reshape(result, (mat_shape, mat_shape))
-        return result
-        
-    
-class HeffSingle:
+
+def compute_Heff_Onesite(LP, RP, W):
     """
-    Class that can be used to perform the multiplication
+    Computes the one-site effective hamiltonian
     |psi'> = H_eff |psi>
-    as a "non-matrix" operation!
+    
+    Parameters
+    ----------
+    LP : np.nadarray, shape vL wL* vL*
+        the left environment tensor
+    RP : np.ndarray, shape vR* wR* vR
+        the right environment tensor
+    W : np.ndarray, shape wL wR i i*
+        the MPO tensor acting on site i
+        
+    Returns
+    -------
+    H_eff : np.ndarray
+        the effective Hamiltonian as a matrix of dimensions
+        '(vL i vR) (vL* i* vR*)'
     """
-    
-    def __init__(self, LP, RP, W):
-        """
-        Parameters
-        ----------
-        LP : np.nadarray, shape vL wL* vL*
-            the left environment tensor
-        RP : np.ndarray, shape vR* wR* vR
-            the right environment tensor
-        W : np.ndarray, shape wL wR i i*
-            the MPO tensor acting on site i
-        """
-        self.LP = LP  # vL wL* vL*
-        self.RP = RP  # vR* wR* vR
-        self.W = W  # wL wR i i*
-        chi1, chi2 = LP.shape[0], RP.shape[2]
-        d = W.shape[2]
-        self.psi_shape = (chi1, d, chi2)  # vL i vR
-        self.shape = (chi1 * d * chi2, chi1 * d * chi2)
-        self.dtype = W.dtype
+    result = np.tensordot(LP, W, ([1], [0])) # vL [wL*] vL*; [wL] wR i i* -> vL vL* wR i i*
+    result = np.tensordot(result, RP, ([2], [1])) # vL vL* [wR] i i*; vR* [wR*] vR -> vL vL* i i* vR* vR
+    result = np.transpose(result, (0, 2, 5, 1, 3, 4)) # vL vL* i i* vR* vR -> vL i vR vL* i* vR*
+    mat_shape = LP.shape[0] * W.shape[2] * RP.shape[2]
+    result = np.reshape(result, (mat_shape, mat_shape))
+    return result
 
-    def multiply(self, psi):
-        """
-        Parameters
-        ----------
-        psi : np.ndarray
-            the one-site wavefunction, must be reshapable into (vL, i, vR)
-            
-        Returns
-        -------
-        np.ndarray :
-            Heff@theta
-        """
-        x = np.reshape(psi, self.psi_shape)  # vL i vR
-        x = np.tensordot(self.LP, x, axes=(2, 0))  # vL wL* [vL*], [vL] i vR
-        x = np.tensordot(x, self.W, axes=([1, 2], [0, 3]))  # vL [wL*] [i] vR, [wL] wR i [i*]
-        x = np.tensordot(x, self.RP, axes=([1, 2], [0, 1]))  # vL [vR] [wR] i, [vR*] [wR*] vR
-        x = np.reshape(x, self.shape[0]) # vL i vR
-        return x
-    
-    def get_as_matrix(self):
-        """
-        Returns the effective Hamiltonian as a matrix
-        """
-        result = np.tensordot(self.LP, self.W, ([1], [0])) # vL [wL*] vL*; [wL] wR i i* -> vL vL* wR i i*
-        result = np.tensordot(result, self.RP, ([2], [1])) # vL vL* [wR] i i*; vR* [wR*] vR -> vL vL* i i* vR* vR
-        result = np.transpose(result, (0, 2, 5, 1, 3, 4)) # vL vL* i i* vR* vR -> vL i vR vL* i* vR*
-        mat_shape = self.psi_shape[0] * self.psi_shape[1] * self.psi_shape[2]
-        result = np.reshape(result, (mat_shape, mat_shape))
-        return result
 
-def evolve(psi, H, dt, N_krylov, debug=False):
+def evolve(psi, H, dt, debug=False):
     """
     Evolves the given vector by time dt using
     psi(t+dt) = exp(-i*H*dt) @ psi(t)
@@ -287,9 +224,5 @@ def evolve(psi, H, dt, N_krylov, debug=False):
         matrix of shape (N, N), (effective) Hamiltonian
     dt : float
         time step
-    N_krylov : int
-        iterations for the krylov exponentiation
     """
-    #return expm(-1.j * H.get_as_matrix() * dt) @ psi
-    #return expm_multiply(-1.j * H.get_as_matrix() * dt, psi)
-    return krylov.expm_krylov(H.multiply, psi, -1.j*dt, min(int(psi.size), N_krylov), hermitian=True)
+    return expm_multiply(-1.j * H * dt, psi)
