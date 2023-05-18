@@ -83,7 +83,7 @@ class HOPS_Engine_Simple:
             self.ts = np.linspace(0, duration, 2*N_steps)
             self.dt = (self.ts[2] - self.ts[0])
             self.construct_linear_propagator()
-            if self.use_noise:
+            if self.use_noise or not self.linear:
                 self.construct_noise_propagator()
             if not self.linear:
                 self.construct_nonLinear_propagator()
@@ -92,7 +92,7 @@ class HOPS_Engine_Simple:
             self.dt = (self.ts[1] - self.ts[0])
             self.aux_N, self.aux_b_dagger, self.aux_b, self.aux_eye = operators.generate_auxiallary_operators_sparse(N_trunc)
             self.construct_linear_Heff()
-            if self.use_noise:
+            if self.use_noise or not self.linear:
                 self.construct_noise_Heff()
             if not self.linear:
                 self.construct_nonlinear_Heff()
@@ -250,7 +250,9 @@ class HOPS_Engine_Simple:
         # compute psi update
         psi_update = self.linear_propagator.dot(psi)
         if self.use_noise:
-            psi_update += (np.conj(self.zts[t_index]) + memory) * self.noise_propagator.dot(psi)    
+            psi_update += (np.conj(self.zts[t_index]) + memory) * self.noise_propagator.dot(psi)
+        else:
+            psi_update += memory * self.noise_propagator.dot(psi)
         psi_update += self.expL*self.non_linear_propagator.dot(psi)
         # compute memory update
         memory_update = -np.conj(self.w.item())*memory + np.conj(self.alpha0)*self.expL
@@ -289,8 +291,11 @@ class HOPS_Engine_Simple:
             # add noise term and non-linear term to H_eff
             if self.use_noise:
                 H_eff += (np.conj(self.zts[t_index]) + self.memory).item() * self.Heff_noise
-                # update memory
-                self.memory = np.exp(-np.conj(self.w)*self.dt) * (self.memory + self.dt*np.conj(self.alpha0)*self.expL)
+            else:
+                H_eff += self.memory * self.Heff_noise
+            # update memory
+            self.memory = np.exp(-np.conj(self.w)*self.dt) * (self.memory + self.dt*np.conj(self.alpha0)*self.expL)
+            self.memory = self.memory.item()
             H_eff += self.expL * self.Heff_nonlinear
         # update state
         self.psi = scipy.sparse.linalg.expm_multiply(-1.j*H_eff*self.dt, self.psi)

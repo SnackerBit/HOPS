@@ -6,6 +6,7 @@ from ..util import bath_correlation_function
 from ..mps import mps
 from ..tdvp import tdvp
 from ..mps import mps_runge_kutta
+from . import alternative_TDVP
 
 class HOMPS_Engine:
     """
@@ -47,8 +48,9 @@ class HOMPS_Engine:
                 wether to use noise or not. For HOPS as described in the paper, noise is essential. 
                 Therefore set use_noise=False only for testing. Default: True
             'method' : string
-                which method to use. Possible methods are 'RK4' (Runge-Kutta) and 'TDVP'
-                (Time Dependent Variational Principle). Default: 'RK4'
+                which method to use. Possible methods are 'RK4' (Runge-Kutta), 'TDVP'
+                (Time Dependent Variational Principle) and 'TDVP2' (TDVP with double site update). 
+                Default: 'RK4'
             'chi_max' : int
                 maximum virtual bond dimension of the MPS. Default: 10
             'eps' : float
@@ -64,6 +66,8 @@ class HOMPS_Engine:
             'use_precise_svd' : bool
                 wether to use the slower but more precise SVD from util.svd_prec.
                 Default: False
+            'optimize_mpo' : bool
+                wether to optimize the bond dimension of the MPO hamiltonian by using SVDs
         """
         self.g = g
         self.w = w
@@ -83,13 +87,14 @@ class HOMPS_Engine:
         self.g_noise = g
         self.w_noise = w
         self.use_precise_svd = False
+        self.optimize_mpo = False
         if options is not None:
             if 'linear' in options:
                 self.linear = options['linear']
             if 'use_noise' in options:
                 self.use_noise = options['use_noise']
             if 'method' in options:
-                if options['method'] == 'RK4' or options['method'] == 'TDVP':
+                if options['method'] == 'RK4' or options['method'] == 'TDVP' or options['method'] == 'TDVP2' or options['method'] == 'TDVP_alternative':
                     self.method = options['method']
                 else:
                     print(f"Unknown method \'{options['method']}\'. Defaulting to \'RK4\'")
@@ -107,6 +112,8 @@ class HOMPS_Engine:
                 assert('g_noise' not in options and 'w_noise' not in options)
             if 'use_precise_svd' in options:
                 self.use_precise_svd = options['use_precise_svd']
+            if 'optimize_mpo' in options:
+                self.optimize_mpo = options['optimize_mpo']
         # construct model
         self.model = homps_model.HOMPSModel(g, w, h, L, N_trunc)
         # determine dtype
@@ -167,7 +174,10 @@ class HOMPS_Engine:
         try:
             for n in progressBar(range(N_samples)):   
                 # setup psi vector
-                self.psi = mps.MPS.init_HOMPS_MPS(psi0, self.N_bath, self.N_trunc, use_precise_svd=self.use_precise_svd)
+                if self.method == 'TDVP' or self.method == 'TDVP_alternative':
+                    self.psi = mps.MPS.init_HOMPS_MPS(psi0, self.N_bath, self.N_trunc, use_precise_svd=self.use_precise_svd, chi_max=self.chi_max)
+                else:
+                    self.psi = mps.MPS.init_HOMPS_MPS(psi0, self.N_bath, self.N_trunc, use_precise_svd=self.use_precise_svd)
                 psis[n, 0, :] = self.extract_physical_state(self.psi)
                 # setup noise
                 if self.use_noise:
@@ -194,9 +204,20 @@ class HOMPS_Engine:
                         psis[n, i+1, :] = self.extract_physical_state(self.psi)
                         if collect_debug_info:
                             self.compute_debug_info(n, i+1)
+                elif self.method == 'TDVP_alternative':
+                    for i in range(0, self.N_steps-1):
+                        self.compute_update_TDVP_alternative(i)
+                        if self.linear == False:
+                            self.psi.norm = 1.
+                        psis[n, i+1, :] = self.extract_physical_state(self.psi)
+                        if collect_debug_info:
+                            self.compute_debug_info(n, i+1)
                 else:
                     # TDVP
-                    self.engine = tdvp.TDVPEngine(self.psi, self.model, self.dt, self.chi_max, self.eps, normalize=False)
+                    if self.method == 'TDVP2':
+                        self.engine = tdvp.TDVP2_Engine(self.psi, self.model, self.dt, self.chi_max, self.eps)
+                    else:
+                        self.engine = tdvp.TDVP1_Engine(self.psi, self.model, self.dt, self.chi_max, self.eps)
                     for i in range(0, self.N_steps-1):
                         self.compute_update_TDVP(i)
                         if self.linear == False:
@@ -232,12 +253,34 @@ class HOMPS_Engine:
             # update MPO
             if self.use_noise:
                 self.engine.model.update_mpo_nonlinear(np.conj(self.zts[i]) + np.sum(self.memory), self.expL)
-                # update memory
-                self.update_memory(self.expL)
             else:
-                self.engine.model.update_mpo_nonlinear(0, self.expL)
+                self.engine.model.update_mpo_nonlinear(np.sum(self.memory), self.expL)
             # update psi
             self.engine.sweep()
+            # update memory
+            self.update_memory(self.expL)
+            
+    def compute_update_TDVP_alternative(self, i):
+        if self.linear:
+            # linear HOPS
+            if self.use_noise:
+                self.model.update_mpo_linear(np.conj(self.zts[i]))
+            # update psi
+            self.psi.Bs = alternative_TDVP.single_sweep_TDVP(self.psi.Bs, self.model.H_mpo, self.dt)
+        else:
+            # non-linear HOPS
+            # compute expectation value of coupling operator
+            psi_phys = self.extract_physical_state(self.psi)
+            self.expL = (np.conj(psi_phys).T @ np.conj(self.model.L).T @ psi_phys) / (np.conj(psi_phys).T @ psi_phys)
+            # update MPO
+            if self.use_noise:
+                self.model.update_mpo_nonlinear(np.conj(self.zts[i]) + np.sum(self.memory), self.expL)
+            else:
+                self.model.update_mpo_nonlinear(np.sum(self.memory), self.expL)
+            # update psi
+            self.psi.Bs = alternative_TDVP.single_sweep_TDVP(self.psi.Bs, self.model.H_mpo, self.dt)
+            # update memory
+            self.update_memory(self.expL)
             
     def compute_update_RK4(self, i):
         """
@@ -248,6 +291,8 @@ class HOMPS_Engine:
             # update MPO
             if self.use_noise:
                 self.model.update_mpo_linear(np.conj(self.zts[i]))
+                if self.optimize_mpo:
+                    self.model.optimize_mpo_bonds()
                 self.model.compute_update_mpo()
             # update psi
             self.psi, self.error = mps_runge_kutta.integrate_MPS_RK4(self.psi, self.dt, self.model.update_mpo, self.chi_max, self.eps)
@@ -258,13 +303,15 @@ class HOMPS_Engine:
             # update MPO
             if self.use_noise:
                 self.model.update_mpo_nonlinear(np.conj(self.zts[i]) + np.sum(self.memory), self.expL)
-                # update memory
-                self.update_memory(self.expL)
             else:
-                self.model.update_mpo_nonlinear(0, self.expL)
+                self.model.update_mpo_nonlinear(np.sum(self.memory), self.expL)
+            if self.optimize_mpo:
+                self.model.optimize_mpo_bonds()
             self.model.compute_update_mpo()
             # update psi
             self.psi, self.error = mps_runge_kutta.integrate_MPS_RK4(self.psi, self.dt, self.model.update_mpo, self.chi_max, self.eps)
+            # update memory
+            self.update_memory(self.expL)
             
     def extract_physical_state(self, psi):
         """
@@ -282,8 +329,8 @@ class HOMPS_Engine:
         """
         contr = psi.Bs[-1][:, 0, 0] # vL
         for i in range(self.model.N_bath-1, 0, -1):
-            contr = np.tensordot(psi.Bs[i][:, 0, :], contr, ([1], [0])) # vL [vR], [vL] -> vL
-        result = np.tensordot(psi.get_theta1(0)[0, :, :], contr, ([1], [0])) # i [vR], [vL] -> i
+            contr = np.tensordot(psi.Bs[i][:, :, 0], contr, ([1], [0])) # vL [vR], [vL] -> vL
+        result = np.tensordot(psi.Bs[0][0, :, :], contr, ([0], [0])) # [vR] i, [vL] -> i
         return result * psi.norm
     
     def update_memory(self, expL):

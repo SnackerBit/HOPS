@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.linalg import svd
 
 from ..util import operators
 
@@ -61,22 +62,24 @@ class HOMPSModel:
         self.eye = eye
         N, b_dagger, b, eye_aux = operators.generate_auxiallary_operators(N_trunc)
         # construct H_mpo
-        self._H0_template = np.zeros((4, 4, 2, 2), dtype=complex)
-        self._H0_template[0, 0, :, :] = -1.j * eye
-        self._H0_template[0, 1, :, :] = 1.j * L
-        self._H0_template[0, 2, :, :] = -1.j * np.conj(L).T
-        self._H0_template[0, 3, :, :] = h
+        self._H_mpo_template = [None]*(self.N_bath + 1)
         self.H_mpo = [None]*(self.N_bath + 1)
-        self.H_mpo[0] = self._H0_template.copy()
+        self._H_mpo_template[0] = np.zeros((4, 4, 2, 2), dtype=complex)
+        self._H_mpo_template[0][0, 0, :, :] = -1.j * eye
+        self._H_mpo_template[0][0, 1, :, :] = 1.j * L
+        self._H_mpo_template[0][0, 2, :, :] = -1.j * np.conj(L).T
+        self._H_mpo_template[0][0, 3, :, :] = h
+        self.H_mpo[0] = self._H_mpo_template[0].copy()
         for i in range(self.N_bath):
-            self.H_mpo[i+1] = np.zeros((4, 4, N_trunc, N_trunc), dtype=complex)
-            self.H_mpo[i+1][0, 0, :, :] = eye_aux
-            self.H_mpo[i+1][1, 1, :, :] = eye_aux
-            self.H_mpo[i+1][2, 2, :, :] = eye_aux
-            self.H_mpo[i+1][3, 3, :, :] = eye_aux
-            self.H_mpo[i+1][0, 3, :, :] = w[i]*N
-            self.H_mpo[i+1][1, 3, :, :] = g[i]*N@b_dagger
-            self.H_mpo[i+1][2, 3, :, :] = b
+            self._H_mpo_template[i+1] = np.zeros((4, 4, N_trunc, N_trunc), dtype=complex)
+            self._H_mpo_template[i+1][0, 0, :, :] = eye_aux
+            self._H_mpo_template[i+1][1, 1, :, :] = eye_aux
+            self._H_mpo_template[i+1][2, 2, :, :] = eye_aux
+            self._H_mpo_template[i+1][3, 3, :, :] = eye_aux
+            self._H_mpo_template[i+1][0, 3, :, :] = w[i]*N
+            self._H_mpo_template[i+1][1, 3, :, :] = g[i]*N@b_dagger
+            self._H_mpo_template[i+1][2, 3, :, :] = b
+            self.H_mpo[i+1] = self._H_mpo_template[i+1].copy()
             
     """
     Updates the MPO (linear HOMPS). Should be called before each time step
@@ -86,7 +89,7 @@ class HOMPSModel:
             the noise z_t^* at the current time. should already be complex conjugated.
     """
     def update_mpo_linear(self, zt):
-        self.H_mpo[0] = self._H0_template.copy()
+        self.H_mpo = [W.copy() for W in self._H_mpo_template]
         self.H_mpo[0][0, 3, :, :] += 1.j * zt * self.L
                         
     """
@@ -113,3 +116,22 @@ class HOMPSModel:
         factor = np.power(-1.j, 1/N)
         for i in range(N):
             self.update_mpo[i] = factor * np.transpose(self.H_mpo[i].copy(), (0, 1, 3, 2)) # wL, wR, i, i* -> wL, wR, i*, i
+            
+    def optimize_mpo_bonds(self):
+        from ..mps.mps import split_and_truncate
+        for i in range(len(self.H_mpo) - 1):
+            A = np.tensordot(self.H_mpo[i], self.H_mpo[i+1], ([1], [0])) # vL [vR] i i*; [vL] vR j j* -> vL i i* vR j j*
+            chi_vL, chi_i, chi_i_c, chi_vR, chi_j, chi_j_c = A.shape
+            A = np.reshape(A, (chi_vL*chi_i*chi_i_c, chi_vR*chi_j*chi_j_c)) # vL i i* vR j j* -> (vL i i*) (vR j j*)
+            U, S, V = svd(A, full_matrices=False, lapack_driver='gesvd')
+            chi_new = np.sum(S > 1.e-13)
+            assert chi_new >= 1
+            piv = np.argsort(S)[::-1][:chi_new]  # keep the largest chi_new singular values
+            U, S, V = U[:, piv], S[piv], V[piv, :]
+            chi_new = S.size
+            #print(S)
+            print("before: ", self.H_mpo[i].shape[1], "after:", chi_new)
+            U = np.reshape(U, (chi_vL, chi_i, chi_i_c, chi_new)) # (vL i i*) new -> vL i i* new 
+            self.H_mpo[i] = np.transpose(U, (0, 3, 1, 2)) # vL i i* new -> vL new i i* = vL vR i i*
+            V = np.tensordot(np.diag(S), V, ([1], [0])) # new [new*]; [new] (vR j j*) -> new (vR j j*)
+            self.H_mpo[i+1] = np.reshape(V, (chi_new, chi_vR, chi_j, chi_j_c)) # new (vR j j*) -> new vR j j* = vL vR j j*
