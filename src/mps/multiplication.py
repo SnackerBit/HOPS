@@ -61,7 +61,7 @@ def multiply(psi, Ws, chi_max, eps, inplace=False, compress=True):
             return psi.canonicalize(chi_max, eps)
         return 0
     else:
-        result = mps.MPS(Bs, [None]*psi.L, use_precise_svd=psi.use_precise_svd)
+        result = mps.MPS(Bs, [None]*psi.L)
         result.norm = psi.norm
         result.canonical = False
         error = 0

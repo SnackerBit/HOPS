@@ -60,7 +60,7 @@ def add(psi1, psi2, chi_max, eps, factor=1., compress=True):
     Bs[-1][B1.shape[0]:, 0, :] = B2[:, 0, :].copy()
     
     # compress the result
-    result = mps.MPS(Bs, [None]*psi1.L, use_precise_svd=psi1.use_precise_svd)
+    result = mps.MPS(Bs, [None]*psi1.L)
     result.canonical = 'none'
     error = 0
     if compress:

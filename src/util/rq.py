@@ -1,7 +1,8 @@
 # Taken from https://leohart.wordpress.com/2010/07/23/rq-decomposition-from-qr-decomposition/
+# TODO: Do we still need this file?
 import numpy as np
 from numpy.linalg import qr
- 
+
 def rq(A):
     '''Implement rq decomposition using QR decomposition'''
     Q,R = qr(np.flipud(A).T)

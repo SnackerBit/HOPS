@@ -69,7 +69,7 @@ class TDVP_Engine:
         Performs one sweep left -> right -> left.
         """                  
         raise NotImplementedError
-            
+
 class TDVP2_Engine(TDVP_Engine):
     """
     Class that implements the 2-site Time Dependent Variational Principle (TDVP) algorithm
@@ -111,7 +111,7 @@ class TDVP2_Engine(TDVP_Engine):
         theta = evolve(theta, Heff, self.dt/2)
         # split and truncate
         theta = np.reshape(theta, (chi_vL*chi_i, chi_j*chi_vR))
-        U, S, V, norm_factor, _ = mps.split_and_truncate(theta, self.chi_max, self.eps, self.psi.use_precise_svd)
+        U, S, V, norm_factor, _ = mps.split_and_truncate(theta, self.chi_max, self.eps)
         self.psi.norm *= norm_factor
         # put back into MPS
         if sweep_right:
@@ -154,7 +154,7 @@ class TDVP2_Engine(TDVP_Engine):
                 psi = np.reshape(psi, psi_shape)
                 # put back into MPS
                 self.psi.Bs[i] = psi
-                
+
 class TDVP1_Engine(TDVP_Engine):
     
     def __init__(self, psi, model, dt, chi_max=0, eps=0, mode='qr'):
@@ -223,7 +223,7 @@ class TDVP1_Engine(TDVP_Engine):
                 self.psi.Bs[i] = np.transpose(B, (0, 2, 1)) # vL i vC -> vL vC i = vL vR i
                 C = R
             else:
-                U, S, V, norm, _ = mps.split_and_truncate(B, self.chi_max, self.eps, self.psi.use_precise_svd)
+                U, S, V, norm, _ = mps.split_and_truncate(B, self.chi_max, self.eps)
                 self.psi.norm *= norm
                 B = np.reshape(U, (chi_vL, chi_i, U.shape[1])) # (vL i) vC -> vL i vC
                 self.psi.Bs[i] = np.transpose(B, (0, 2, 1)) # vL i vC -> vL vC i = vL vR i
@@ -239,7 +239,7 @@ class TDVP1_Engine(TDVP_Engine):
                 self.psi.Bs[i] = np.transpose(B, (0, 2, 1)) # vC i vR -> vC vR i = vL vR i
                 C = R
             else:
-                U, S, V, norm, _ = mps.split_and_truncate(B, self.chi_max, self.eps, self.psi.use_precise_svd)
+                U, S, V, norm, _ = mps.split_and_truncate(B, self.chi_max, self.eps)
                 self.psi.norm *= norm
                 B = np.reshape(V, (V.shape[0], chi_i, chi_vR)) # vC (i vR) -> vC i vR
                 self.psi.Bs[i] = np.transpose(B, (0, 2, 1)) # vC i vR -> vC vR i = vL vR i
@@ -257,7 +257,7 @@ class TDVP1_Engine(TDVP_Engine):
         else:
             self.psi.Bs[i-1] = np.tensordot(self.psi.Bs[i-1], C, ([1], [0])) # vL [vR] i; [vL] vC -> vL i vC
             self.psi.Bs[i-1] = np.transpose(self.psi.Bs[i-1], (0, 2, 1)) # vL i vC -> vL vC i
-                      
+
 def compute_Heff_Twosite(LP, RP, W1, W2):
     """
     Computes the two-site effective hamiltonian

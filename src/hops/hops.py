@@ -14,8 +14,7 @@ class HOPS_Engine_Simple:
     \alpha(\tau) = g e^{-\omega \tau}
     
     (only one bath mode). Both the linear and the non-linear HOPS equation are implemented.
-    For integration, either Runge-Kutta (RK4) or trotter decomposition with an effective
-    Hamiltonian is used. To speed up the computation we use scipy sparse matrices.
+    For integration,Runge-Kutta (RK4) is used. To speed up the computation we use scipy sparse matrices.
     """
     def __init__(self, g, w, h, L, duration, N_steps, N_trunc, options={}):
         """
@@ -47,13 +46,11 @@ class HOPS_Engine_Simple:
             'use_noise' : bool
                 wether to use noise or not. For HOPS as described in the paper, noise is essential. 
                 Therefore set use_noise=False only for testing. Default: True
-            'method' : string
-                which method to use. Possible methods are 'RK4' (Runge-Kutta) and 'Trotter'
-                (Trotter decomposition). Default: 'RK4'
         """
         # only implemented for one bath mode
         assert(w.size == 1)
         assert(g.size == 1)
+        options = dict(options) # create copy
         self.g = g
         self.w = w
         self.h = h
@@ -61,48 +58,33 @@ class HOPS_Engine_Simple:
         self.L = L
         self.N_steps = N_steps
         self.N_trunc = N_trunc
-        self.alpha0 = bath_correlation_function.alpha(0, g, w).item()
         self.eye = scipy.sparse.identity(self.dim)
         self.zts = None
         # parse the options
         self.linear = False
         self.use_noise = True
-        self.method = 'RK4'
         if options is not None:
             if 'linear' in options:
                 self.linear = options['linear']
+                del options['linear']
             if 'use_noise' in options:
                 self.use_noise = options['use_noise']
-            if 'method' in options:
-                if options['method'] == 'RK4' or options['method'] == 'Trotter':
-                    self.method = options['method']
-                else:
-                    print(f"Unknown method \'{options['method']}\'. Defaulting to \'RK4\'")
-        # construct propagators/Heffs
-        if self.method == 'RK4':
-            self.ts = np.linspace(0, duration, 2*N_steps)
-            self.dt = (self.ts[2] - self.ts[0])
-            self.construct_linear_propagator()
-            if self.use_noise or not self.linear:
-                self.construct_noise_propagator()
-            if not self.linear:
-                self.construct_nonLinear_propagator()
-        else:
-            self.ts = np.linspace(0, duration, N_steps)
-            self.dt = (self.ts[1] - self.ts[0])
-            self.aux_N, self.aux_b_dagger, self.aux_b, self.aux_eye = operators.generate_auxiallary_operators_sparse(N_trunc)
-            self.construct_linear_Heff()
-            if self.use_noise or not self.linear:
-                self.construct_noise_Heff()
-            if not self.linear:
-                self.construct_nonlinear_Heff()
+                del options['use_noise']
+            for key, item in options.items():
+                print("[WARNING]: Unused option", key, ":", item)
+        # construct propagators
+        self.ts = np.linspace(0, duration, 2*N_steps)
+        self.dt = (self.ts[2] - self.ts[0])
+        self.construct_linear_propagator()
+        if self.use_noise or not self.linear:
+            self.construct_noise_propagator()
+        if not self.linear:
+            self.construct_nonLinear_propagator()
         # setup noise generator
         if self.use_noise:
             alpha = lambda tau : bath_correlation_function.alpha(tau, g, w) 
-            if self.method == 'RK4':
-                self.generator = noise_generator.ColoredNoiseGenerator_FourierFiltering(2*N_steps, alpha, 0, duration)
-            else:
-                self.generator = noise_generator.ColoredNoiseGenerator_FourierFiltering(N_steps, alpha, 0, duration)
+            self.generator = noise_generator.ColoredNoiseGenerator_FourierFiltering(alpha, 0, duration)
+            self.generator.initialize(2*N_steps)
                 
     def construct_linear_propagator(self):
         """
@@ -119,7 +101,7 @@ class HOPS_Engine_Simple:
             self.linear_propagator[self.dim*k:self.dim*(k+1), self.dim*k:self.dim*(k+1)] += Hk
         # term acting on \Psi^{(k-1)}
         for k in range(1, self.N_trunc):
-            Hkm1 = k*self.alpha0*self.L
+            Hkm1 = k*self.g*self.L
             self.linear_propagator[self.dim*k:self.dim*(k+1), self.dim*(k-1):self.dim*k] += Hkm1
         # term acting on \Psi^{(k+1)}
         for k in range(self.N_trunc-1):
@@ -154,42 +136,6 @@ class HOPS_Engine_Simple:
         self.non_linear_propagator = scipy.sparse.lil_matrix((self.N_trunc*self.dim, self.N_trunc*self.dim), dtype=complex)
         for k in range(self.N_trunc-1):
             self.non_linear_propagator[self.dim*k:self.dim*(k+1), self.dim*(k+1):self.dim*(k+2)] += self.eye   
-            
-    def construct_linear_Heff(self):
-        """
-        Helper function that constructs the linear effective Hamiltonian
-
-        H_{eff}^{linear} = H \otimes \mathbb{1} - i\omega \mathbb{1} \otimes \hat{N} + i\alpha(0) L \otimes \hat{b}\hat{N} - i L^\dagger \otimes \hat{b}
-
-        as a sparse matrix. This is used when self.method=='Trotter'.
-        """
-        self.Heff_linear = scipy.sparse.lil_matrix((self.N_trunc*self.dim, self.N_trunc*self.dim), dtype=complex)
-        self.Heff_linear += scipy.sparse.kron(self.aux_eye, self.h)
-        self.Heff_linear -= 1.j * self.w.item() * scipy.sparse.kron(self.aux_N, self.eye)
-        self.Heff_linear += 1.j * self.alpha0 * scipy.sparse.kron(self.aux_N@self.aux_b_dagger, self.L)
-        self.Heff_linear -= 1.j * scipy.sparse.kron(self.aux_b, np.conj(self.L).T)
-        
-    def construct_noise_Heff(self):
-        """
-        Helper function that constructs the noise effective Hamiltonian
-
-        H_{eff}^{noise} = i L \otimes \mathbb{1} 
-
-        as a sparse matrix. This is used when self.method=='Trotter'.
-        """
-        self.Heff_noise = scipy.sparse.lil_matrix((self.N_trunc*self.dim, self.N_trunc*self.dim), dtype=complex)
-        self.Heff_noise += 1.j * scipy.sparse.kron(self.aux_eye, self.L)
-        
-    def construct_nonlinear_Heff(self):
-        """
-        Helper function that constructs the non-linear effective Hamiltonian
-
-        H_{eff}^{non-linear} = i \mathbb{1} \otimes \hat{b}^\dagger 
-
-        as a sparse matrix. This is used when self.method=='Trotter'.
-        """
-        self.Heff_nonlinear = scipy.sparse.lil_matrix((self.N_trunc*self.dim, self.N_trunc*self.dim), dtype=complex)
-        self.Heff_nonlinear += 1.j * scipy.sparse.kron(self.aux_b, self.eye)
         
     def f_linear(self, t_index, psi):
         """
@@ -255,10 +201,10 @@ class HOPS_Engine_Simple:
             psi_update += memory * self.noise_propagator.dot(psi)
         psi_update += self.expL*self.non_linear_propagator.dot(psi)
         # compute memory update
-        memory_update = -np.conj(self.w.item())*memory + np.conj(self.alpha0)*self.expL
+        memory_update = -np.conj(self.w.item())*memory + np.conj(self.g)*self.expL
         return psi_update, memory_update
     
-    def compute_update_RK4(self, t_index):
+    def compute_update(self, t_index):
         """
         Updates self.Psi (and if self.linear == False also updates self.memory),
         using the RK4 method
@@ -272,35 +218,7 @@ class HOPS_Engine_Simple:
         else:
             self.psi, self.memory = runge_kutta.integrate_RK4_with_memory(self.psi, self.memory, 2*t_index, self.dt, self.f_nonlinear)
         
-    def compute_update_Trotter(self, t_index):
-        """
-        Updates self.Psi (and if self.linear == False also updates self.memory),
-        using the Trotter decomposition method
-        ------------------------------------
-        Parameters:
-            t_index : int
-                current time index. Used as index into self.ts
-        """
-        H_eff = self.Heff_linear.copy()
-        if self.linear:
-            if self.use_noise:
-                H_eff += np.conj(self.zts[t_index]) * self.Heff_noise
-        else:
-            # compute the expectation value of self.L^\dagger
-            self.expL = (np.conj(self.psi[0:self.dim]).T @ np.conj(self.L).T @ self.psi[0:self.dim]) / (np.conj(self.psi[0:self.dim]).T @ self.psi[0:self.dim])
-            # add noise term and non-linear term to H_eff
-            if self.use_noise:
-                H_eff += (np.conj(self.zts[t_index]) + self.memory).item() * self.Heff_noise
-            else:
-                H_eff += self.memory * self.Heff_noise
-            # update memory
-            self.memory = np.exp(-np.conj(self.w)*self.dt) * (self.memory + self.dt*np.conj(self.alpha0)*self.expL)
-            self.memory = self.memory.item()
-            H_eff += self.expL * self.Heff_nonlinear
-        # update state
-        self.psi = scipy.sparse.linalg.expm_multiply(-1.j*H_eff*self.dt, self.psi)
-        
-    def compute_realizations(self, N_samples, psi0=np.array([1, 0], dtype=complex), progressBar=iter, zts_debug=None, compute_debug_info=False):
+    def compute_realizations(self, N_samples, start=0, psi0=np.array([1, 0], dtype=complex), data_path=None, progressBar=iter, zts_debug=None, compute_debug_info=False):
         """
         Computes multiple realizations of the HOPS
         
@@ -308,8 +226,13 @@ class HOPS_Engine_Simple:
         ----------
         N_samples : int
             How many realizations you want to compute
+        start : int
+            the realization we start with. Can be used to continue interrupted runs.
         psi0 : np.ndarray
             initial state of the system. array should be of shape (self.dim,) and of dtype complex
+        data_path : str
+            if this is set, the realizations are not returned but instead stored at
+            the given path, with increasing numbering. Default: None
         progressBar : class
             optional progressBar to visualize how long the computation will take. usage:
             ```
@@ -333,7 +256,7 @@ class HOPS_Engine_Simple:
         -------
         np.ndarray
             array of shape (N_samples, N_steps, dim) of dtype complex containing the physical state \Psi_t^{(k=0)}
-            for discrete times t.
+            for discrete times t. Is only returned if data_path == None.
         """
         # save psi vectors in list
         psis = np.empty((N_samples, self.N_steps, self.dim), dtype=complex)
@@ -342,7 +265,7 @@ class HOPS_Engine_Simple:
             self.expL = 0
             self.initialize_debug_info(N_samples)
         # main loop
-        for n in progressBar(range(N_samples)):
+        for n in progressBar(range(start, N_samples)):
             # setup psi vector
             self.psi = np.zeros(self.dim*self.N_trunc, dtype=complex)
             self.psi[0:self.dim] = psi0.copy()
@@ -361,17 +284,18 @@ class HOPS_Engine_Simple:
                 self.compute_debug_info(n, 0)
             # Compute realization
             for i in range(0, self.N_steps-1):
-                if self.method == 'RK4':
-                    self.compute_update_RK4(i)
-                else:
-                    self.compute_update_Trotter(i)
+                self.compute_update(i)
                 if not self.linear:
                     # normalize
                     self.psi /= np.linalg.norm(self.psi)
                 psis[n, i+1, :] = self.psi[0:self.dim]
                 if compute_debug_info:
                     self.compute_debug_info(n, i+1)
-        return psis
+            # save realization
+            if data_path is not None:
+                np.save(data_path+str(n), psis[n, :, :])
+        if data_path is None:
+            return psis
     
     def initialize_debug_info(self, N_samples):
         """

@@ -1,7 +1,6 @@
 import numpy as np
 from scipy.linalg import svd
 from numpy.linalg import qr
-from ..util import svd_prec
 
 class MPS:
     """
@@ -19,13 +18,9 @@ class MPS:
         canonical form, in left-canonical form, or in right-canonical form.
     norm : complex
         additional overall scalar factor of the MPS
-    use_precise_svd : bool
-        wether to use the slower but more precise SVD from util.svd_prec.
-    dtype : np.dtype
-        the np.dtype used for linear algebra. One of {np.complex128, np.complex256}
     """
     
-    def __init__(self, Bs, canonical='none', norm=1., use_precise_svd=False):
+    def __init__(self, Bs, canonical='none', norm=1.):
         """
         Initializes an MPS. It is not checked wether the given canonicalization
         does in fact apply (if you specify eg. canonical='right', the class just
@@ -35,11 +30,6 @@ class MPS:
         self.L = len(Bs)
         self.canonical = canonical
         self.norm = norm
-        self.use_precise_svd = use_precise_svd
-        if self.use_precise_svd:
-            self.dtype = np.complex256
-        else:
-            self.dtype = np.complex128
             
     def get_theta_2(self, i):
         """
@@ -53,7 +43,7 @@ class MPS:
         """
         Creates a true copy of this MPS
         """
-        return MPS([B.copy() for B in self.Bs], self.canonical, self.norm, self.use_precise_svd)
+        return MPS([B.copy() for B in self.Bs], self.canonical, self.norm)
     
     def get_bond_dims(self):
         """
@@ -172,11 +162,7 @@ class MPS:
             chi_vL, chi_vR, chi_i = B.shape
             B = np.transpose(B, (0, 2, 1)) # vL vR i -> vL i vR
             B = np.reshape(B, (chi_vL*chi_i, chi_vR)) # vL i vR -> (vL i) vR
-            if self.use_precise_svd:
-                Q, S, R = svd_prec.svd_prec(B)
-                R = np.tensordot(np.diag(S), R, ([1], [0])) # DEBUG, TODO: Change!
-            else:
-                Q, R = qr(B)
+            Q, R = qr(B)
             chi_new = Q.shape[1]
             B = np.reshape(Q, (chi_vL, chi_i, chi_new))
             B = np.transpose(B, (0, 2, 1)) # vL i vR -> vL vR i
@@ -191,7 +177,7 @@ class MPS:
             B = np.transpose(B, (0, 2, 1)) # vL vR i -> vL i vR
             B = np.reshape(B, (chi_vL, chi_i*chi_vR)) # vL i vR -> vL (i vR)
             # perform SVD
-            U, S, V, norm_factor, error_temp = split_and_truncate(B, chi_max=chi_max, eps=eps, use_precise_svd=self.use_precise_svd)
+            U, S, V, norm_factor, error_temp = split_and_truncate(B, chi_max=chi_max, eps=eps)
             chi_new = S.size
             self.norm *= norm_factor
             error += error_temp
@@ -222,17 +208,13 @@ class MPS:
       
     def sanity_check(self):
         """
-        Checks if all bond dimensions match up, if the dtype is correct,
-        and if self.canonical is set correctly
+        Checks if all bond dimensions match up and if self.canonical is set correctly
         """
         # Check if the bond dimensions match up
         assert(self.Bs[0].shape[0] == 1)
         assert(self.Bs[-1].shape[1] == 1)
         for i in range(self.L-1):
             assert(self.Bs[i].shape[1] == self.Bs[i+1].shape[0])
-        # Check if the dtype is correct
-        for i in range(self.L):
-            assert(self.Bs[i].dtype == self.dtype)
         # Check for canonicalization
         if self.canonical == 'left':
             assert(self.is_left_canonical())
@@ -264,22 +246,19 @@ class MPS:
         return True
         
     @staticmethod
-    def initialize_spinup(L, chimax=1, use_precise_svd=False):
+    def initialize_spinup(L, chimax=1):
         """
         Returns a product state with all spins up as an MPS
         """
-        dtype = complex
-        if use_precise_svd:
-            dtype=np.complex256
-        B = np.zeros([chimax, chimax, 2], dtype=dtype)
+        B = np.zeros([chimax, chimax, 2], dtype=complex)
         B[0, 0, 0] = 1.
         Bs = [B.copy() for _ in range(L)]
         Bs[0] = np.expand_dims(Bs[0][0, :, :], axis=0)
         Bs[-1] = np.expand_dims(Bs[-1][:, 0, :], axis=1)
-        return MPS(Bs, use_precise_svd=use_precise_svd)
+        return MPS(Bs)
     
     @staticmethod
-    def initialize_from_state_vector(psi, L, chi_max=100, eps=0, d=2, use_precise_svd=False):
+    def initialize_from_state_vector(psi, L, chi_max=100, eps=0, d=2):
         """
         Initializes an MPS from a state vector in Hilbert space
         
@@ -337,10 +316,10 @@ class MPS:
             Bs[n] = M_n
         assert(psi_aL.shape == (1,1))
         norm *= si_aL.item()
-        return MPS(Bs, norm=norm, use_precise_svd=use_precise_svd)
+        return MPS(Bs, norm=norm)
     
     @staticmethod
-    def init_HOMPS_MPS(psi0, N_bath, N_trunc, use_precise_svd=False, chi_max=1):
+    def init_HOMPS_MPS(psi0, N_bath, N_trunc, chi_max=1):
         """
         Returns a product state MPS that can be used in HOMPS.
         All bath modes are initially set to zero
@@ -353,8 +332,6 @@ class MPS:
             number of bath sites
         N_trunc : int
             truncation order of the bath sites
-        use_precise_svd : bool
-            wether to use the slower but more precise SVD from util.svd_prec.
         
         Returns
         -------
@@ -363,27 +340,21 @@ class MPS:
             shape (1, 1, d), and all others have shape (1, 1, N_trunc).
             In total there are (N_bath + 1) tensors in the MPS
         """
-        dtype=complex
-        if use_precise_svd:
-            dtype=np.complex256
         Bs = [None]*(N_bath + 1)
         chi = min(psi0.size, chi_max)
-        B_physical = np.zeros([1, chi, psi0.size], dtype=dtype)
+        B_physical = np.zeros([1, chi, psi0.size], dtype=complex)
         B_physical[0, 0, :] = psi0
         Bs[0] = B_physical
         for i in range(N_bath):
             chi_prime = min(chi_max, min(chi*N_trunc, N_trunc**(N_bath-i-1)))
-            B_bath = np.zeros([chi, chi_prime, N_trunc], dtype=dtype)
+            B_bath = np.zeros([chi, chi_prime, N_trunc], dtype=complex)
             B_bath[0, 0, 0] = 1.
             Bs[i+1] = B_bath
-        return MPS(Bs, use_precise_svd=use_precise_svd)
-    
-def split_and_truncate(A, chi_max=0, eps=0, use_precise_svd=False):
+        return MPS(Bs)
+
+def split_and_truncate(A, chi_max=0, eps=0):
     # perform SVD
-    if use_precise_svd:
-        U, S, V = svd_prec.svd_prec(A)
-    else:
-        U, S, V = svd(A, full_matrices=False, lapack_driver='gesvd')
+    U, S, V = svd(A, full_matrices=False, lapack_driver='gesvd')
     # truncate
     if chi_max > 0:
         chi_new = min(chi_max, np.sum(S > eps))

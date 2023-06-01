@@ -41,7 +41,7 @@ def generate_spin_boson_hamiltonian(delta=1, epsilon=0):
     H = -0.5*delta*sigma_x + 0.5*epsilon*sigma_z
     return H
 
-def generate_auxiallary_operators(N_trunc):
+def generate_auxiallary_operators(N_trunc, rescale_aux=True):
     """
     Computes the auxillary operators that are used in some of the
     HOPS/HOMPS implementations as np.ndarray
@@ -50,6 +50,11 @@ def generate_auxiallary_operators(N_trunc):
     ----------
     N_trunc : int
         dimension of the auxillary Hilbert space
+    rescale_aux : int
+        If this is set to true (default), the raising and lowering
+        operators will include the factors sqrt(n + 1) and sqrt(n)
+        respectively (this is necessary for HOMPS with rescaled 
+        auxillary vectors)
 
     Returns
     -------
@@ -65,9 +70,15 @@ def generate_auxiallary_operators(N_trunc):
     # number operator
     N = np.diag(np.arange(0, N_trunc, dtype=complex))
     # lowering operator
-    b = np.diag(np.ones(N_trunc-1, dtype=complex), 1)
+    if rescale_aux:
+        b = np.diag(np.sqrt(np.arange(1, N_trunc, dtype=complex)), 1)
+    else:
+        b = np.diag(np.sqrt(np.ones(N_trunc-1, dtype=complex)), 1)
     # raising operator
-    b_dagger = np.diag(np.ones(N_trunc-1, dtype=complex), -1)
+    if rescale_aux:
+        b_dagger = np.diag(np.sqrt(np.arange(1, N_trunc, dtype=complex)), -1)
+    else:
+        b_dagger = np.diag(np.sqrt(np.ones(N_trunc-1, dtype=complex)), -1)
     # identity operator
     eye = np.eye(N_trunc, dtype=complex)
     # return the three operators
@@ -113,7 +124,7 @@ def generate_spin_boson_hamiltonian_sparse(delta=1, epsilon=0):
     H = -0.5*delta*sigma_x + 0.5*epsilon*sigma_z
     return H
 
-def generate_auxiallary_operators_sparse(N_trunc):
+def generate_auxiallary_operators_sparse(N_trunc, rescale_aux=True):
     """
     Computes the auxillary operators that are used in some of the
     HOPS/HOMPS implementations as scipy sparse matrices
@@ -122,6 +133,11 @@ def generate_auxiallary_operators_sparse(N_trunc):
     ----------
     N_trunc : int
         dimension of the auxillary Hilbert space
+    rescale_aux : int
+        If this is set to true (default), the raising and lowering
+        operators will include the factors sqrt(n + 1) and sqrt(n)
+        respectively (this is necessary for HOMPS with rescaled 
+        auxillary vectors)
 
     Returns
     -------
@@ -137,9 +153,20 @@ def generate_auxiallary_operators_sparse(N_trunc):
     # number operator
     N = sparse.csr_matrix(np.diag(np.arange(0, N_trunc, dtype=complex)))
     # lowering operator
-    b = sparse.csr_matrix(np.diag(np.ones(N_trunc-1, dtype=complex), 1))
+    b = sparse.csr_matrix(np.diag(np.sqrt(np.arange(1, N_trunc, dtype=complex)), 1))
     # raising operator
-    b_dagger = sparse.csr_matrix(np.diag(np.ones(N_trunc-1, dtype=complex), -1))
+    b_dagger = sparse.csr_matrix(np.diag(np.sqrt(np.arange(1, N_trunc, dtype=complex)), -1))
+    
+    # lowering operator
+    if rescale_aux:
+        b = sparse.csr_matrix(np.diag(np.sqrt(np.arange(1, N_trunc, dtype=complex)), 1))
+    else:
+        b = sparse.csr_matrix(np.diag(np.sqrt(np.ones(N_trunc-1, dtype=complex)), 1))
+    # raising operator
+    if rescale_aux:
+        b_dagger = sparse.csr_matrix(np.diag(np.sqrt(np.arange(1, N_trunc, dtype=complex)), -1))
+    else:
+        b_dagger = sparse.csr_matrix(np.diag(np.sqrt(np.ones(N_trunc-1, dtype=complex)), -1))
     # identity operator
     eye = sparse.csr_matrix(np.eye(N_trunc, dtype=complex))
     # return the three operators

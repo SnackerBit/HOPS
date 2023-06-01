@@ -6,7 +6,6 @@ from ..util import bath_correlation_function
 from ..mps import mps
 from ..tdvp import tdvp
 from ..mps import mps_runge_kutta
-from . import alternative_TDVP
 
 class HOMPS_Engine:
     """
@@ -48,27 +47,34 @@ class HOMPS_Engine:
                 wether to use noise or not. For HOPS as described in the paper, noise is essential. 
                 Therefore set use_noise=False only for testing. Default: True
             'method' : string
-                which method to use. Possible methods are 'RK4' (Runge-Kutta), 'TDVP'
-                (Time Dependent Variational Principle) and 'TDVP2' (TDVP with double site update). 
-                Default: 'RK4'
+                which method to use. Possible methods are 'RK4' (Runge-Kutta), 'TDVP' (single-site TDVP)
+                and 'TDVP2' (double-site TDVP). Default: 'RK4'
             'chi_max' : int
                 maximum virtual bond dimension of the MPS. Default: 10
             'eps' : float
                 minimum value of singular values. During the bond update of TDVP
                 singular values smaller than epsilon will be discarded.
                 Default value: 1.e-10
-            'g_noise' : list of complex
-                expansion coefficients for the BCF used for computing noise.
-                It can be beneficial to use more terms for noise computation than for coupling
-                to heat baths, because the noise computation is relatively cheap. Default: None
-            'w_noise' : list of complex
+            'g_memory' : list of complex
+                expansion coefficients for the BCF used for computing memory updates.
+                It can be beneficial to use more terms for memory computation than for coupling
+                to heat baths, because the memory computation is relatively cheap. Default: None
+            'w_memory' : list of complex
                 frequencies for the expansion of the BCF. See above. Default: None
-            'use_precise_svd' : bool
-                wether to use the slower but more precise SVD from util.svd_prec.
-                Default: False
             'optimize_mpo' : bool
                 wether to optimize the bond dimension of the MPO hamiltonian by using SVDs
+            'noise_generator' : class instance
+                if this option is given, the given noise generator is used instead of
+                the standard one. Default: None
+            'rescale_aux' : bool
+                Wether or not to rescale the auxillary vectors for better numerical stability.
+                Default: True
+            'alternative_realization' : bool
+                Wether to use the alternative HOPS
+            'gamma_terminator' : complex
+                terminator coefficient for alternative HOPS
         """
+        options = dict(options) # create copy
         self.g = g
         self.w = w
         self.N_bath = len(g)
@@ -84,51 +90,76 @@ class HOMPS_Engine:
         self.method = 'RK4'
         self.chi_max = 10
         self.eps = 1.e-10
-        self.g_noise = g
-        self.w_noise = w
-        self.use_precise_svd = False
+        self.g_memory = g
+        self.w_memory = w
         self.optimize_mpo = False
+        self.generator = None
+        self.rescale_aux = True
+        self.alternative_realization = False
+        self.gamma_terminator = 0
         if options is not None:
             if 'linear' in options:
                 self.linear = options['linear']
+                del options['linear']
             if 'use_noise' in options:
                 self.use_noise = options['use_noise']
+                del options['use_noise']
             if 'method' in options:
-                if options['method'] == 'RK4' or options['method'] == 'TDVP' or options['method'] == 'TDVP2' or options['method'] == 'TDVP_alternative':
+                if options['method'] == 'RK4' or options['method'] == 'TDVP2':
                     self.method = options['method']
                 else:
                     print(f"Unknown method \'{options['method']}\'. Defaulting to \'RK4\'")
+                del options['method']
             if 'chi_max' in options:
                 self.chi_max = options['chi_max']
+                del options['chi_max']
             if 'eps' in options:
                 self.eps = options['eps']
-            if 'g_noise' in options and 'w_noise' in options:
-                # g_noise and w_noise need to have the same length
-                assert(len(options['g_noise']) == len(options['w_noise']))
-                self.g_noise = options['g_noise']
-                self.w_noise = options['w_noise']
+                del options['eps']
+            if 'g_memory' in options and 'w_memory' in options:
+                # g_memory and w_memory need to have the same length
+                assert(len(options['g_memory']) == len(options['w_memory']))
+                self.g_memory = options['g_memory']
+                self.w_memory = options['w_memory']
+                del options['g_memory']
+                del options['w_memory']
             else:
-                # You need to specify both g_noise and w_noise
-                assert('g_noise' not in options and 'w_noise' not in options)
-            if 'use_precise_svd' in options:
-                self.use_precise_svd = options['use_precise_svd']
+                # You need to specify both g_memory and w_memory
+                assert('g_memory' not in options and 'w_memory' not in options)
             if 'optimize_mpo' in options:
                 self.optimize_mpo = options['optimize_mpo']
+                del options['optimize_mpo']
+            if 'noise_generator' in options:
+                self.generator = options['noise_generator']
+                del options['noise_generator']
+            if 'rescale_aux' in options:
+                self.rescale_aux = options['rescale_aux']
+                del options['rescale_aux']
+            if 'alternative_realization' in options:
+                self.alternative_realization = options['alternative_realization']
+                del options['alternative_realization']
+            if 'gamma_terminator' in options:
+                self.gamma_terminator = options['gamma_terminator']
+                del options['gamma_terminator']
+            for key, item in options.items():
+                print("[WARNING]: Unused option", key, ":", item)
         # construct model
-        self.model = homps_model.HOMPSModel(g, w, h, L, N_trunc)
-        # determine dtype
-        if self.use_precise_svd:
-            self.dtype = np.complex256
-        else:
-            self.dtype = np.complex128
+        self.model = homps_model.HOMPSModel(g, w, h, L, N_trunc, self.rescale_aux, self.alternative_realization, self.gamma_terminator)
         # construct noise generator
         if self.use_noise:
-            alpha = lambda tau : bath_correlation_function.alpha(tau, g, w)
-            if self.g_noise is not None:
-                alpha = lambda tau : bath_correlation_function.alpha(tau, self.g_noise, self.w_noise)
-            self.generator = noise_generator.ColoredNoiseGenerator_FourierFiltering(N_steps, alpha, 0, duration)
+            if self.generator is None:
+                alpha = lambda tau : bath_correlation_function.alpha(tau, g, w)
+                if self.g_memory is not None:
+                    alpha = lambda tau : bath_correlation_function.alpha(tau, self.g_memory, self.w_memory)
+                self.generator = noise_generator.ColoredNoiseGenerator_FourierFiltering(alpha, 0, duration)
+            if self.method == 'RK4':
+                self.generator.initialize(2*N_steps)
+            else:
+                self.generator.initialize(N_steps)
+        if self.linear:
+            self.memory = 0
             
-    def compute_realizations(self, N_samples, psi0=np.array([1, 0], dtype=np.complex256), progressBar=iter, zts_debug=None, collect_debug_info=False):
+    def compute_realizations(self, N_samples, start=0, psi0=np.array([1, 0], dtype=complex), data_path=None, progressBar=iter, zts_debug=None, collect_debug_info=False):
         """
         Computes multiple realizations of the HOMPS
         
@@ -136,8 +167,13 @@ class HOMPS_Engine:
         ----------
         N_samples : int
             How many realizations you want to compute
+        start : int
+            the realization we start with. Can be used to continue interrupted runs.
         psi0 : np.ndarray
             initial state of the system. array should be of shape (self.dim,) and of dtype complex
+        data_path : str
+            if this is set, the realizations are not returned but instead stored at
+            the given path, with increasing numbering. Default: None
         progressBar : class
             optional progressBar to visualize how long the computation will take. usage:
             ```
@@ -165,19 +201,19 @@ class HOMPS_Engine:
             for discrete times t.
         """
         # setup vector storing psis
-        psis = np.empty((N_samples, self.N_steps, self.dim), dtype=self.dtype)
+        psis = np.empty((N_samples, self.N_steps, self.dim), dtype=complex)
         # setup debug info
         if collect_debug_info:
             self.expL = 0
             self.initialize_debug_info(N_samples)
         # main loop
         try:
-            for n in progressBar(range(N_samples)):   
+            for n in progressBar(range(start, N_samples)):   
                 # setup psi vector
-                if self.method == 'TDVP' or self.method == 'TDVP_alternative':
-                    self.psi = mps.MPS.init_HOMPS_MPS(psi0, self.N_bath, self.N_trunc, use_precise_svd=self.use_precise_svd, chi_max=self.chi_max)
+                if self.method == 'TDVP':
+                    self.psi = mps.MPS.init_HOMPS_MPS(psi0, self.N_bath, self.N_trunc, chi_max=self.chi_max)
                 else:
-                    self.psi = mps.MPS.init_HOMPS_MPS(psi0, self.N_bath, self.N_trunc, use_precise_svd=self.use_precise_svd)
+                    self.psi = mps.MPS.init_HOMPS_MPS(psi0, self.N_bath, self.N_trunc)
                 psis[n, 0, :] = self.extract_physical_state(self.psi)
                 # setup noise
                 if self.use_noise:
@@ -187,7 +223,7 @@ class HOMPS_Engine:
                         self.zts = zts_debug
                 # setup memory
                 if not self.linear:
-                    self.memory = np.zeros(self.g_noise.size, dtype=complex)
+                    self.memory = np.zeros(self.g_memory.size, dtype=complex)
                 # initially compute debug_info
                 if collect_debug_info:
                     self.compute_debug_info(n, 0)
@@ -198,15 +234,7 @@ class HOMPS_Engine:
                         # Initial computation of the update MPO
                         self.model.compute_update_mpo()
                     for i in range(0, self.N_steps-1):
-                        self.compute_update_RK4(i)
-                        if self.linear == False:
-                            self.psi.norm = 1.
-                        psis[n, i+1, :] = self.extract_physical_state(self.psi)
-                        if collect_debug_info:
-                            self.compute_debug_info(n, i+1)
-                elif self.method == 'TDVP_alternative':
-                    for i in range(0, self.N_steps-1):
-                        self.compute_update_TDVP_alternative(i)
+                        self.compute_update_RK4(2*i)
                         if self.linear == False:
                             self.psi.norm = 1.
                         psis[n, i+1, :] = self.extract_physical_state(self.psi)
@@ -225,6 +253,9 @@ class HOMPS_Engine:
                         psis[n, i+1, :] = self.extract_physical_state(self.engine.psi)
                         if collect_debug_info:
                             self.compute_debug_info(n, i+1)
+                # save realization
+                if data_path is not None:
+                    np.save(data_path+str(n), psis[n, :, :])
         except KeyboardInterrupt:
             # If a keyboard interruption occurs, return progress up to this point!
             if n > 0:
@@ -233,7 +264,8 @@ class HOMPS_Engine:
             else:
                 print("detected keyboard interrupt.")
                 return None
-        return psis
+        if data_path is None:
+            return psis
             
     def compute_update_TDVP(self, i):
         """
@@ -242,7 +274,7 @@ class HOMPS_Engine:
         if self.linear:
             # linear HOPS
             if self.use_noise:
-                self.engine.model.update_mpo_linear(np.conj(self.zts[i]))
+                self.engine.model.update_mpo_linear(self.zts[i])
             # update psi
             self.engine.sweep()
         else:
@@ -252,33 +284,11 @@ class HOMPS_Engine:
             self.expL = (np.conj(psi_phys).T @ np.conj(self.model.L).T @ psi_phys) / (np.conj(psi_phys).T @ psi_phys)
             # update MPO
             if self.use_noise:
-                self.engine.model.update_mpo_nonlinear(np.conj(self.zts[i]) + np.sum(self.memory), self.expL)
+                self.engine.model.update_mpo_nonlinear(self.zts[i], np.sum(self.memory), self.expL)
             else:
-                self.engine.model.update_mpo_nonlinear(np.sum(self.memory), self.expL)
+                self.engine.model.update_mpo_nonlinear(0, np.sum(self.memory), self.expL)
             # update psi
             self.engine.sweep()
-            # update memory
-            self.update_memory(self.expL)
-            
-    def compute_update_TDVP_alternative(self, i):
-        if self.linear:
-            # linear HOPS
-            if self.use_noise:
-                self.model.update_mpo_linear(np.conj(self.zts[i]))
-            # update psi
-            self.psi.Bs = alternative_TDVP.single_sweep_TDVP(self.psi.Bs, self.model.H_mpo, self.dt)
-        else:
-            # non-linear HOPS
-            # compute expectation value of coupling operator
-            psi_phys = self.extract_physical_state(self.psi)
-            self.expL = (np.conj(psi_phys).T @ np.conj(self.model.L).T @ psi_phys) / (np.conj(psi_phys).T @ psi_phys)
-            # update MPO
-            if self.use_noise:
-                self.model.update_mpo_nonlinear(np.conj(self.zts[i]) + np.sum(self.memory), self.expL)
-            else:
-                self.model.update_mpo_nonlinear(np.sum(self.memory), self.expL)
-            # update psi
-            self.psi.Bs = alternative_TDVP.single_sweep_TDVP(self.psi.Bs, self.model.H_mpo, self.dt)
             # update memory
             self.update_memory(self.expL)
             
@@ -286,32 +296,42 @@ class HOMPS_Engine:
         """
         Computes a single RK4 update step
         """
+        self.psi, self.memory, self.error = mps_runge_kutta.integrate_MPS_RK4_with_memory(self.psi, self.memory, i, self.dt, self.compute_mpo_and_memory_update, self.chi_max, self.eps)
+           
+    def compute_mpo_and_memory_update(self, psi, memory, t_index):
+        """
+        Computes the right hand side of the HOMPS equation as an MPO, and the right hand side
+        of the memory update equation. Used for the RK4 integration
+        
+        Parameters
+        ----------
+        psi : MPS
+            the current state
+        memory : list of complex
+            the current memory
+        t_index : int
+            current time index (index into self.zts)
+        """
         if self.linear:
-            # linear HOPS
-            # update MPO
             if self.use_noise:
-                self.model.update_mpo_linear(np.conj(self.zts[i]))
+                self.model.update_mpo_linear(self.zts[t_index])
                 if self.optimize_mpo:
                     self.model.optimize_mpo_bonds()
                 self.model.compute_update_mpo()
-            # update psi
-            self.psi, self.error = mps_runge_kutta.integrate_MPS_RK4(self.psi, self.dt, self.model.update_mpo, self.chi_max, self.eps)
+            return self.model.update_mpo, 0
         else:
-            # compute expectation value of coupling operator
-            psi_phys = self.extract_physical_state(self.psi)
+            psi_phys = self.extract_physical_state(psi)
             self.expL = (np.conj(psi_phys).T @ np.conj(self.model.L).T @ psi_phys) / (np.conj(psi_phys).T @ psi_phys)
             # update MPO
             if self.use_noise:
-                self.model.update_mpo_nonlinear(np.conj(self.zts[i]) + np.sum(self.memory), self.expL)
+                self.model.update_mpo_nonlinear(self.zts[t_index], np.sum(memory), self.expL)
             else:
-                self.model.update_mpo_nonlinear(np.sum(self.memory), self.expL)
+                self.model.update_mpo_nonlinear(0, np.sum(memory), self.expL)
             if self.optimize_mpo:
                 self.model.optimize_mpo_bonds()
             self.model.compute_update_mpo()
-            # update psi
-            self.psi, self.error = mps_runge_kutta.integrate_MPS_RK4(self.psi, self.dt, self.model.update_mpo, self.chi_max, self.eps)
-            # update memory
-            self.update_memory(self.expL)
+            memory_update = -np.conj(self.w_memory)*memory + np.conj(self.g_memory)*self.expL
+            return self.model.update_mpo, memory_update
             
     def extract_physical_state(self, psi):
         """
@@ -343,16 +363,16 @@ class HOMPS_Engine:
             the expectation value of the system operator <L^\dagger> at the current time.
         """
         # update memory
-        self.memory = np.exp(-np.conj(self.w_noise)*self.dt) * (self.memory + self.dt*np.conj(self.g_noise)*expL)
+        self.memory = np.exp(-np.conj(self.w_memory)*self.dt) * (self.memory + self.dt*np.conj(self.g_memory)*expL)
         
     def initialize_debug_info(self, N_samples):
         """
         Initializes the debug_info dictionary
         """
         self.debug_info = {
-            'memory' : np.empty((N_samples, self.N_steps, len(self.g_noise)), dtype=complex),
+            'memory' : np.empty((N_samples, self.N_steps, len(self.g_memory)), dtype=complex),
             'expL' : np.empty((N_samples, self.N_steps), dtype=float),
-            'average_bond_dim' : np.empty((N_samples, self.N_steps))
+            'bond_dims' : np.empty((N_samples, self.N_steps, self.N_bath))
         }
         
     def compute_debug_info(self, n, i):
@@ -362,6 +382,9 @@ class HOMPS_Engine:
         self.debug_info['memory'][n, i, :] = self.memory
         self.debug_info['expL'][n, i] = np.real_if_close(self.expL)
         if self.method == 'TDVP':
-            self.debug_info['average_bond_dim'][n, i] = self.engine.psi.get_average_bond_dim()
+            self.debug_info['bond_dims'][n, i] = self.engine.psi.get_bond_dims()
         else:
-            self.debug_info['average_bond_dim'][n, i] = self.psi.get_average_bond_dim()
+            self.debug_info['bond_dims'][n, i] = self.psi.get_bond_dims()
+
+
+''

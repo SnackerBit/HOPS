@@ -30,7 +30,7 @@ class HOMPSModel:
         For all other tensors H_mpo[j], j > 0 it holds dim(i) = dim(i*) = N_trunc
     """
     
-    def __init__(self, g, w, h, L, N_trunc):
+    def __init__(self, g, w, h, L, N_trunc, rescale_aux=True, alternative_realization=False, gamma_terminator=0):
         """
         Parameters
         ----------
@@ -51,24 +51,35 @@ class HOMPSModel:
             the W-tensors of the MPO
         N : int
             number of tensors in the MPO. It holds N = N_bath + 1
+        rescale_aux : bool
+            Wether or not to use the HOMPS equation for rescaled auxillary states,
+            which gives better numerical stability
+        alternative_realization : bool
+            Wether to use the alternative realization of HOPS
         """
         self.N_bath = g.shape[0]
         assert(self.N_bath == w.shape[0])
         self.L = L
         self.N_trunc = N_trunc
         self.N = self.N_bath + 1
+        self.alternative_realization = alternative_realization
         # get some useful operators
         sigma_x, sigma_z, eye = operators.generate_physical_operators()
         self.eye = eye
-        N, b_dagger, b, eye_aux = operators.generate_auxiallary_operators(N_trunc)
+        N, b_dagger, b, eye_aux = operators.generate_auxiallary_operators(N_trunc, rescale_aux)
         # construct H_mpo
         self._H_mpo_template = [None]*(self.N_bath + 1)
         self.H_mpo = [None]*(self.N_bath + 1)
         self._H_mpo_template[0] = np.zeros((4, 4, 2, 2), dtype=complex)
         self._H_mpo_template[0][0, 0, :, :] = -1.j * eye
-        self._H_mpo_template[0][0, 1, :, :] = 1.j * L
-        self._H_mpo_template[0][0, 2, :, :] = -1.j * np.conj(L).T
-        self._H_mpo_template[0][0, 3, :, :] = h
+        if self.alternative_realization:
+            self._H_mpo_template[0][0, 1, :, :] = -1.j * L
+            self._H_mpo_template[0][0, 2, :, :] = 1.j * np.conj(L).T
+            self._H_mpo_template[0][0, 3, :, :] = h - 1.j * gamma_terminator * np.conj(L).T@L
+        else:
+            self._H_mpo_template[0][0, 1, :, :] = 1.j * L
+            self._H_mpo_template[0][0, 2, :, :] = -1.j * np.conj(L).T
+            self._H_mpo_template[0][0, 3, :, :] = h
         self.H_mpo[0] = self._H_mpo_template[0].copy()
         for i in range(self.N_bath):
             self._H_mpo_template[i+1] = np.zeros((4, 4, N_trunc, N_trunc), dtype=complex)
@@ -76,9 +87,14 @@ class HOMPSModel:
             self._H_mpo_template[i+1][1, 1, :, :] = eye_aux
             self._H_mpo_template[i+1][2, 2, :, :] = eye_aux
             self._H_mpo_template[i+1][3, 3, :, :] = eye_aux
-            self._H_mpo_template[i+1][0, 3, :, :] = w[i]*N
-            self._H_mpo_template[i+1][1, 3, :, :] = g[i]*N@b_dagger
-            self._H_mpo_template[i+1][2, 3, :, :] = b
+            if rescale_aux:
+                self._H_mpo_template[i+1][0, 3, :, :] = w[i]*b_dagger@b
+                self._H_mpo_template[i+1][1, 3, :, :] = g[i]/np.sqrt(np.abs(g[i]))*b_dagger
+                self._H_mpo_template[i+1][2, 3, :, :] = np.sqrt(np.abs(g[i]))*b
+            else:
+                self._H_mpo_template[i+1][0, 3, :, :] = w[i]*N
+                self._H_mpo_template[i+1][1, 3, :, :] = g[i]*N@b_dagger
+                self._H_mpo_template[i+1][2, 3, :, :] = b
             self.H_mpo[i+1] = self._H_mpo_template[i+1].copy()
             
     """
@@ -86,26 +102,35 @@ class HOMPSModel:
     ------------------------------------
     Parameters:
         zt: complex
-            the noise z_t^* at the current time. should already be complex conjugated.
+            the noise z_t at the current time (including memory terms, when doing non-linear HOMPS).
     """
     def update_mpo_linear(self, zt):
         self.H_mpo = [W.copy() for W in self._H_mpo_template]
-        self.H_mpo[0][0, 3, :, :] += 1.j * zt * self.L
+        if self.alternative_realization:
+            self.H_mpo[0][0, 3, :, :] += zt * self.L
+        else:
+            self.H_mpo[0][0, 3, :, :] += 1.j * np.conj(zt) * self.L
                         
     """
     Updates the MPO (non-linear HOMPS). Should be called before each time step
     ------------------------------------
     Parameters:
         zt: complex
-            the noise \tilde{z}_t^* at the current time. should already include
-            memory terms and be complex conjugated.
+            the noise \tilde{z}_t at the current time.
+        memory : complex
+            current memory term
         expL : float
             the expectation value of the system operator <L^\dagger> at the current
             time.
     """
-    def update_mpo_nonlinear(self, zt, expL):
-        self.update_mpo_linear(zt)
-        self.H_mpo[0][0, 2, :, :] += 1.j * expL * self.eye
+    def update_mpo_nonlinear(self, zt, memory, expL):
+        self.H_mpo = [W.copy() for W in self._H_mpo_template]
+        if self.alternative_realization:
+            self.H_mpo[0][0, 3, :, :] += (zt + memory) * self.L
+            self.H_mpo[0][0, 2, :, :] -= 1.j * expL * self.eye
+        else:
+            self.H_mpo[0][0, 3, :, :] += 1.j * (np.conj(zt) + memory) * self.L
+            self.H_mpo[0][0, 2, :, :] += 1.j * expL * self.eye
         
     """
     Computes self.update_mpo from self.H_mpo. The update MPO is just -1.j*H_mpo.
