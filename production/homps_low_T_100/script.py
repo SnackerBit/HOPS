@@ -10,9 +10,9 @@ from src.util import debye_spectral_density
 epsilon = 2.0
 delta = -2.0
 # Parameters for the Debye spectral density
-beta = 0.5
+beta = 50
 T = 1/beta
-gamma = 0.25
+gamma = 5.0
 eta = 0.5
 # operators
 sigma_x, sigma_z, eye = operators.generate_physical_operators()
@@ -21,17 +21,16 @@ h = operators.generate_spin_boson_hamiltonian(delta=delta, epsilon=epsilon)
 # time window
 duration = 30
 
-N_steps = 500
-N_trunc = 40
-N_terms = 1
+N_steps = 1500
+N_trunc = 9
+N_terms = 13
 
-g, w = debye_spectral_density.get_debye_coefficients(N_terms, T, gamma, eta)
-
+g, w = debye_spectral_density.get_debye_coefficients(N_terms, T, gamma, eta, mode='pade')
 options = {
     'linear' : False,
     'use_noise' : True,
     'chi_max' : 10,
-    'eps' : 0,
+    'eps' : 1e-3,
     'method' : 'RK4',
     'rescale_aux' : True,
 }

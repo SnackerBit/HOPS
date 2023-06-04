@@ -23,13 +23,9 @@ duration = 30
 
 N_steps = 500
 N_trunc = 40
-N = 10000
 N_terms = 1
-w_cut = 500
 
 g, w = debye_spectral_density.get_debye_coefficients(N_terms, T, gamma, eta)
-
-J = lambda w : debye_spectral_density.debye_spectral_density(w, eta, gamma)
 
 options = {
     'linear' : False,
@@ -37,7 +33,6 @@ options = {
     'chi_max' : 10,
     'eps' : 0,
     'method' : 'RK4',
-    'noise_generator' : noise_generator.ColoredNoiseGenerator_SumApprox(J, 0, duration, N, w_cut, beta),
     'rescale_aux' : True,
 }
 

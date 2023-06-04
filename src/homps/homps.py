@@ -372,7 +372,8 @@ class HOMPS_Engine:
         self.debug_info = {
             'memory' : np.empty((N_samples, self.N_steps, len(self.g_memory)), dtype=complex),
             'expL' : np.empty((N_samples, self.N_steps), dtype=float),
-            'bond_dims' : np.empty((N_samples, self.N_steps, self.N_bath))
+            'bond_dims' : np.empty((N_samples, self.N_steps, self.N_bath)),
+            'full_state' : [[None]*self.N_steps for i in range(N_samples)],
         }
         
     def compute_debug_info(self, n, i):
@@ -383,8 +384,10 @@ class HOMPS_Engine:
         self.debug_info['expL'][n, i] = np.real_if_close(self.expL)
         if self.method == 'TDVP':
             self.debug_info['bond_dims'][n, i] = self.engine.psi.get_bond_dims()
+            self.debug_info['full_state'][n, i] = self.engine.psi.copy()
         else:
             self.debug_info['bond_dims'][n, i] = self.psi.get_bond_dims()
+            self.debug_info['full_state'][n][i] = self.psi.copy()
 
 
 ''

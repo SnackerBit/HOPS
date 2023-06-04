@@ -22,9 +22,8 @@ h = operators.generate_spin_boson_hamiltonian(delta=delta, epsilon=epsilon)
 duration = 30
 
 N_steps = 500
-N_trunc = 40
+N_trunc_list = [30, 40]
 N_terms = 1
-
 g, w = debye_spectral_density.get_debye_coefficients(N_terms, T, gamma, eta)
 
 options = {
@@ -32,9 +31,9 @@ options = {
     'use_noise' : True,
     'chi_max' : 10,
     'eps' : 0,
-    'method' : 'RK4',
-    'rescale_aux' : True,
+    'method' : 'RK4'
 }
 
-my_homps = homps.HOMPS_Engine(g, w, h, L, duration, N_steps, N_trunc, options)
-my_homps.compute_realizations(N_samples=100, data_path="data/psi")
+for N_trunc in N_trunc_list:
+    my_homps = homps.HOMPS_Engine(g, w, h, L, duration, N_steps, N_trunc, options)
+    my_homps.compute_realizations(N_samples=10000, data_path="data/N_trunc_"+str(N_trunc)+"/psi")
