@@ -1,5 +1,5 @@
 #!/bin/sh
-#SBATCH -J homps100
+#SBATCH -J homps1000
 #SBATCH -o ./N.out
 #SBATCH -D ./
 #SBATCH --clusters=serial
@@ -9,7 +9,7 @@
 #SBATCH --mem=10mb
 #SBATCH --mail-user=benjamin.sappler@tum.de
 #SBATCH --export=NONE
-#SBATCH --time=10:00:00
+#SBATCH --time=40:00:00
 module load slurm_setup
 module load python
 source ../../../HOPS_env/bin/activate

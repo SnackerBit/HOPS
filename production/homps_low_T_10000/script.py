@@ -1,5 +1,4 @@
 import numpy as np
-from os.path import exists
 import sys
 sys.path.append("../../")
 from src.util import operators
@@ -31,15 +30,10 @@ options = {
     'linear' : False,
     'use_noise' : True,
     'chi_max' : 10,
-    'eps' : 1e-4,
+    'eps' : 1e-3,
     'method' : 'RK4',
     'rescale_aux' : True,
 }
 
 my_homps = homps.HOMPS_Engine(g, w, h, L, duration, N_steps, N_trunc, options)
-n = 0
-while n < 100:
-    psi = my_homps.compute_realizations(1)
-    while exists(f"data/psi{str(n)}.npy"):
-        n += 1
-    np.save(f"data/psi{str(n)}.npy", psi)
+my_homps.compute_realizations(N_samples=10000, start=8000, data_path="data/psi")
