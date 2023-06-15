@@ -5,9 +5,9 @@ The methods are based on the Non-Markovian Quantum State Diffusion Equation [[3]
 
 This implementation was created as part of my bachelor's thesis [[4]](#4). <br />
 
-The repository includes three folders, `src`, "test", and "production". In the "src" folder the actual implementation is given in the
-form of python code. In the "test" folder different parts of the implementation are tested with jupyter notebooks. Finally, in the "production"
-folder, the scripts are given that were used to produce all plots in my thesis.
+The repository includes three folders, `src`, `test`, and `production`. In the `src` folder the actual implementation is given in the
+form of python code. In the `test` folder different parts of the implementation are tested with jupyter notebooks. Finally, in the `production`
+folder, the scripts that were used to produce all plots in my thesis are given.
 
 ## References
 <a id="1">[1]</a> 
