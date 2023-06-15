@@ -3,7 +3,8 @@
 This repository contains implementations for the Hierarchy of Pure States [[1]](#1) and Hierarchy of Matrix Product States [[2]](#2) methods.
 The methods are based on the Non-Markovian Quantum State Diffusion Equation [[3]](#3). <br />
 
-This implementation was created as part of my bachelor's thesis [[4]](#4). <br />
+This implementation was created as part of my bachelor's thesis [[4]](#4). In the thesis, the derivation of HOPS and HOMPS and the implementation
+of both methods is explained in detail. <br />
 
 The repository includes three folders, `src`, `test`, and `production`. In the `src` folder the actual implementation is given in the
 form of python code. In the `test` folder different parts of the implementation are tested with jupyter notebooks. Finally, in the `production`
