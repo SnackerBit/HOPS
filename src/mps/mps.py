@@ -4,7 +4,9 @@ from numpy.linalg import qr
 
 class MPS:
     """
-    Class representing a Matrix Product State.
+    Class representing a Matrix Product State. A good introduction of MPS can be found at
+    https://arxiv.org/abs/1008.3477, "The density-matrix renormalization group in the 
+    age of matrix product states"
     
     Attributes
     ----------
@@ -199,7 +201,7 @@ class MPS:
         """
         Contracts the MPS to form a state vector in Hilbert space
         """
-        contr = self.Bs[0][0] # i vR
+        contr = np.transpose(self.Bs[0][0]) # vR i -> i vR
         for i in range(1, self.L):
             contr = np.tensordot(contr, self.Bs[i], ([1], [0])) # i [vR]; [vL] vR j -> i vR j
             contr = np.transpose(contr, (0, 2, 1)) # i vR j -> i j vR
@@ -286,7 +288,7 @@ class MPS:
         d = np.array(d, dtype=int)
         # first, reshape the state into a single column vector (if its not already in this form)
         psi_aL = np.reshape(psi, (np.prod(d), 1))
-        Ss = [None] * L 
+        Bs = [None] * L 
         norm = 1.
         # now iterate over the sites of the chain
         for n in range(L-1, -1, -1):
@@ -313,9 +315,9 @@ class MPS:
             M_n = np.reshape(M_n, (Chi_np1, d[n], Chi_n))
             # reabsorb lambda
             psi_aL = psitilde_n[:,:] * lambda_n[np.newaxis, :]
-            Bs[n] = M_n
+            Bs[n] = np.transpose(M_n, (0, 2, 1))
         assert(psi_aL.shape == (1,1))
-        norm *= si_aL.item()
+        norm *= psi_aL.item()
         return MPS(Bs, norm=norm)
     
     @staticmethod
@@ -353,7 +355,33 @@ class MPS:
         return MPS(Bs)
 
 def split_and_truncate(A, chi_max=0, eps=0):
-    # perform SVD
+    """
+    Performs a truncated singular value decomposition.
+    
+    Parameters
+    ----------
+    A : np.ndarray of shape (N, M)
+        the matrix on which the SVD is to performed
+    chi_max : int
+        maximum bond dimension after truncation. If chi_max is set
+        to zero, no constraint is placed on the bond dimension.
+    eps : float
+        singular values smaller than this value are truncated.
+        
+    Returns
+    -------
+    U : np.ndarray of shape (N, chi)
+        result of the SVD. It holds chi <= chi_max
+    S : np.ndarray of shape (chi,)
+        result of the SVD. It holds chi <= chi_max.
+        Can be transformed to a diagonal matrix with np.diag(S)
+    V : np.ndarray of shape (chi, M)
+        result of the SVD. It holds chi <= chi_max
+    norm : float
+        the norm of the singular values that were not truncated
+    error : float
+        the sum of all truncated singular values squared.
+    """
     U, S, V = svd(A, full_matrices=False, lapack_driver='gesvd')
     # truncate
     if chi_max > 0:

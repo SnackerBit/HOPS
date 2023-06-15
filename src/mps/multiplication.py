@@ -1,5 +1,6 @@
 """
-This file implements multiplication of an MPS with an MPO
+This file implements multiplication of an MPS with an MPO, see https://arxiv.org/pdf/1008.3477.pdf, 
+"The density-matrix renormalization group in the age of matrix product states"
 """
 
 import numpy as np

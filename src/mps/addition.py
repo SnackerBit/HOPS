@@ -1,6 +1,7 @@
 """
 This file implements the addition of two MPS of possibly different bond dimension
-and with OBC, see https://arxiv.org/pdf/1008.3477.pdf (section 4.3)
+and with OBC, see section 4.3 of https://arxiv.org/pdf/1008.3477.pdf, 
+"The density-matrix renormalization group in the age of matrix product states"
 """
 
 import numpy as np

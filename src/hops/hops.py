@@ -9,7 +9,8 @@ from . import runge_kutta
 class HOPS_Engine_Simple:
     """
     Class that implements the Hierarchy of Stochastic Pure States (HOPS) as described in
-    https://arxiv.org/abs/1402.4647, for the simple bath correlation function
+    Phys. Rev. Lett. 113, 150403 (2014), "Hierarchy of Stochastic Pure States for 
+    Open Quantum System Dynamics", for the simple bath correlation function
 
     \alpha(\tau) = g e^{-\omega \tau}
     

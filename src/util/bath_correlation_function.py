@@ -76,7 +76,8 @@ def alpha_sum(tau, J, beta, N, dw):
     
     \alpha(\tau) = \frac{1}{\pi} \int_0^{\infty} dw J(w) (coth(w*\beta/2)cos(w*\tau) - i*sin(\tau)).
     
-    by approximating the integral with a fixed sum 
+    by approximating the integral with a fixed sum as done in J. Chem. Phys. 144, 224105 (2016), 
+    "An alternative realization of the exact non-Markovian stochastic Schrödinger equation"
     
     Parameters
     ----------

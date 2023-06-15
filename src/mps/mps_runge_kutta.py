@@ -1,5 +1,6 @@
 """
-This file implements the MPS Runge-Kutta algorithm from https://arxiv.org/abs/1907.12044
+This file implements the MPS Runge-Kutta algorithm from J. Chem. Phys. 152, 024127 (2020),
+"Numerical Assessment for Accuracy and GPU Acceleration of TD-DMRG Time Evolution Schemes"
 """
 
 import numpy as np

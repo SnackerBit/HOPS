@@ -12,7 +12,9 @@ class HOMPS_Engine:
     This class implements the Hierarchy Of Matrix Pure States (HOMPS) method to
     simulate systems in contact with a heat bath. This class uses the Time Dependent
     Variational Principle (TDVP) or Runge-Kutta of fourth order (RK4) to 
-    integreate the HOMPS equations
+    integreate the HOMPS equations.
+    See Phys. Rev. A 105, L030202 (2022), "Non-Markovian stochastic Schrödinger equation: 
+    Matrix-product-state approach to the hierarchy of pure states"
     """
     
     def __init__(self, g, w, h, L, duration, N_steps, N_trunc, options={}):

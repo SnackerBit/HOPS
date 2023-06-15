@@ -141,22 +141,3 @@ class HOMPSModel:
         factor = np.power(-1.j, 1/N)
         for i in range(N):
             self.update_mpo[i] = factor * np.transpose(self.H_mpo[i].copy(), (0, 1, 3, 2)) # wL, wR, i, i* -> wL, wR, i*, i
-            
-    def optimize_mpo_bonds(self):
-        from ..mps.mps import split_and_truncate
-        for i in range(len(self.H_mpo) - 1):
-            A = np.tensordot(self.H_mpo[i], self.H_mpo[i+1], ([1], [0])) # vL [vR] i i*; [vL] vR j j* -> vL i i* vR j j*
-            chi_vL, chi_i, chi_i_c, chi_vR, chi_j, chi_j_c = A.shape
-            A = np.reshape(A, (chi_vL*chi_i*chi_i_c, chi_vR*chi_j*chi_j_c)) # vL i i* vR j j* -> (vL i i*) (vR j j*)
-            U, S, V = svd(A, full_matrices=False, lapack_driver='gesvd')
-            chi_new = np.sum(S > 1.e-13)
-            assert chi_new >= 1
-            piv = np.argsort(S)[::-1][:chi_new]  # keep the largest chi_new singular values
-            U, S, V = U[:, piv], S[piv], V[piv, :]
-            chi_new = S.size
-            #print(S)
-            print("before: ", self.H_mpo[i].shape[1], "after:", chi_new)
-            U = np.reshape(U, (chi_vL, chi_i, chi_i_c, chi_new)) # (vL i i*) new -> vL i i* new 
-            self.H_mpo[i] = np.transpose(U, (0, 3, 1, 2)) # vL i i* new -> vL new i i* = vL vR i i*
-            V = np.tensordot(np.diag(S), V, ([1], [0])) # new [new*]; [new] (vR j j*) -> new (vR j j*)
-            self.H_mpo[i+1] = np.reshape(V, (chi_new, chi_vR, chi_j, chi_j_c)) # new (vR j j*) -> new vR j j* = vL vR j j*

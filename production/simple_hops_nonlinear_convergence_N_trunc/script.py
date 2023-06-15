@@ -22,4 +22,4 @@ options = {
 }
 for N_trunc in N_trunc_list:
     my_hops = hops.HOPS_Engine_Simple(g, w, h, L, duration, N_steps, N_trunc, options)
-    my_hops.compute_realizations(N_samples=10000, start=8800, data_path="data/psi_N_trunc_"+str(N_trunc)+"_")
+    my_hops.compute_realizations(N_samples=10000, data_path="data/psi_N_trunc_"+str(N_trunc)+"_")

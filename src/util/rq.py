@@ -1,5 +1,4 @@
 # Taken from https://leohart.wordpress.com/2010/07/23/rq-decomposition-from-qr-decomposition/
-# TODO: Do we still need this file?
 import numpy as np
 from numpy.linalg import qr
 

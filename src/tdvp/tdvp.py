@@ -1,3 +1,9 @@
+"""
+This file implements the Time Dependant Variational Principle (TDVP) algorithm.
+Both the one-site and the two-site version are implemented. 
+See "https://tensornetwork.org/mps/algorithms/timeevo/tdvp.html".
+"""
+
 import numpy as np
 from ..mps import mps
 from scipy.linalg import expm

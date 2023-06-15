@@ -1,3 +1,9 @@
+"""
+This file implements a basic version of the Time Evolving Block Decimation (TEBD) algorithm,
+see https://arxiv.org/pdf/1008.3477.pdf, 
+"The density-matrix renormalization group in the age of matrix product states"
+"""
+
 import numpy as np
 from scipy.linalg import expm
 from ..mps.mps import split_and_truncate
@@ -29,7 +35,7 @@ def run_TEBD(psi, U_bonds, N_steps, chi_max, eps):
             for i_bond in range(k, Nbonds, 2):
                 update_bond(psi, i_bond, U_bonds[i_bond], chi_max, eps)
     # done
-    
+
 def update_bond(psi, i, U_bond, chi_max, eps):
     """Apply `U_bond` acting on i,j=(i+1) to `psi`."""
     j = i + 1

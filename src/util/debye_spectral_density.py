@@ -43,7 +43,8 @@ def get_debye_coefficients(N_terms, T, gamma, eta, mode='matsubara', use_alterna
         can be one of 'matsubara' and 'pade'
     use_alternative_expansion : bool
         wether to use the alternative expansion of the
-        bath correlation function.
+        bath correlation function, see J. Chem. Phys. 144, 224105 (2016), 
+        "An alternative realization of the exact non-Markovian stochastic Schrödinger equation"
         
     Returns
     -------
@@ -88,8 +89,25 @@ def get_debye_coefficients(N_terms, T, gamma, eta, mode='matsubara', use_alterna
     return gs, ws
 
 
-# performs the [N-1/N] PDS scheme
 def PSD_Nm1_N(N, mode='fermi'):
+    """
+    Performs the [N-1,N] PSD scheme to obtain the parameters for the Padé spectrum decomposition. See
+    J. Chem. Phys. 134, 244106 (2011), "Padé spectrum decompositions of quantum distribution
+    functions and optimal hierarchical equations of motion construction for quantum open systems"
+    
+    Parameters
+    ----------
+    N : int
+        parameter for the PSD scheme
+    mode : str
+        can be either 'fermi' or 'bose'. Decides if the fermi or bose
+        function is used in the PSD scheme.
+    
+    Returns
+    -------
+    xi, eta : floats
+        parameters for approximating the fermi/bose function
+    """
     # compute bs
     if mode=='fermi':
         b = 2*np.arange(1, 2*N+2) - 1

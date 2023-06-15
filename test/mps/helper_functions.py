@@ -48,9 +48,9 @@ def overlap(bra, ket):
     left = np.reshape(left, (1, 1))
     for n in range(L):
         # Contract left with bra
-        left = np.tensordot(left, bra.Bs[n].conj(), (0, 0))
+        left = np.tensordot(left, ket.Bs[n], (0, 0)) # [vR] vR'; [vL] vR i -> vR' vR i
         # Contract left with ket
-        left = np.tensordot(left, ket.Bs[n], [(0, 1), (0, 1)])
+        left = np.tensordot(left, bra.Bs[n].conj(), [(0, 2), (0, 2)]) # [vR'] vR [i]; [vL'] vR' [i'] -> vR vR'
     return left[0, 0]
 
 

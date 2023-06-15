@@ -36,4 +36,4 @@ options = {
 }
 
 my_homps = homps.HOMPS_Engine(g, w, h, L, duration, N_steps, N_trunc, options)
-my_homps.compute_realizations(N_samples=10000, start=8000, data_path="data/psi")
+my_homps.compute_realizations(N_samples=10000, data_path="data/psi")
