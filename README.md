@@ -1,5 +1,5 @@
 # Hierarchy of Pure States (HOPS) and Hierarchy of Matrix Product States (HOMPS)
-## Simulating the time evolution of open non-markovian quantum systems
+## Simulating the time evolution of open non-Markovian quantum systems
 This repository contains implementations for the Hierarchy of Pure States [[1]](#1) and Hierarchy of Matrix Product States [[2]](#2) methods.
 The methods are based on the Non-Markovian Quantum State Diffusion Equation [[3]](#3). <br />
 
