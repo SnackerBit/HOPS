@@ -18,4 +18,4 @@ X. Gao, J. Ren, A. Eisfeld, and Z. Shuai. “Non-Markovian stochastic Schröding
 <a id="3">[3]</a> 
 L. Diósi, N. Gisin, and W. T. Strunz. “Non-Markovian quantum state diffusion”. In: Phys. Rev. A 58 (3 1998), pp. 1699–1712 <br />
 <a id="4">[4]</a> 
-Benjamin Sappler, "Benchmarking a Tensor Network Algorithm for the HOPS-Method to Simulate Open non-Markovian Quantum Sytems" <br />
+Benjamin Sappler, "Benchmarking a Tensor Network Algorithm for the HOPS-Method to Simulate Open non-Markovian Quantum Sytems" https://github.com/SnackerBit/bachelors-thesis-computer-science <br />
